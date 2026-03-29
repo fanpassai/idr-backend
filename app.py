@@ -15,7 +15,13 @@ from scanner.engine import scan_url
 from receipt.generator import generate_receipt, verify_receipt, format_receipt_summary
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": [
+    "https://www.idrshield.com",
+    "https://idrshield.com",
+    "https://idrshield.vercel.app",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500"
+]}})
 app.config['JSON_SORT_KEYS'] = False
 
 # In-memory store (Phase 2: replace with PostgreSQL)
