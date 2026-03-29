@@ -15,13 +15,15 @@ def _result_to_dict(result) -> dict:
     """Convert ScanResult to a clean serializable dict."""
     cats = []
     for c in result.categories:
+        slug = c.name.lower().replace(" ", "_").replace("&", "and")
+        failed = len(c.issues)
         cats.append({
             "name": c.name,
-            "slug": c.slug,
+            "slug": slug,
             "score": c.score,
             "status": c.status,
-            "passed": c.passed,
-            "failed": c.failed,
+            "passed": 0,
+            "failed": failed,
             "issues": [
                 {
                     "category": i.category,
@@ -39,7 +41,7 @@ def _result_to_dict(result) -> dict:
     return {
         "url": result.url,
         "domain": result.domain,
-        "page_title": result.page_title,
+        "page_title": result.title,
         "scan_duration_ms": result.scan_duration_ms,
         "overall_score": result.overall_score,
         "overall_status": result.overall_status,
