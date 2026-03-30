@@ -6,11 +6,13 @@ Production build with PostgreSQL, email delivery, and evidence logging.
 import os
 import traceback
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import io
 
 from scanner.engine import scan_url
 from receipt.generator import generate_receipt, verify_receipt, format_receipt_summary
+from receipt.pdf_generator import generate_pdf
 from database import (
     init_db, save_receipt, get_receipt, get_receipts_by_domain,
     upsert_registry, get_registry, log_evidence, get_evidence_log,
@@ -267,3 +269,26 @@ def badge_status(domain):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
     app.run(host='0.0.0.0', port=port, debug=False)
+
+
+@app.route('/api/receipt/<receipt_id>/pdf', methods=['GET'])
+def download_pdf(receipt_id):
+    """Generate and stream the full 10-section Defense Package PDF."""
+    try:
+        receipt = _get(receipt_id)
+        if not receipt:
+            return _error(f"Receipt {receipt_id} not found.", 404)
+
+        pdf_bytes = generate_pdf(receipt)
+        domain = receipt.get('scan', {}).get('domain', 'idr')
+        filename = f"IDR-Receipt-{domain}-{receipt_id[:8]}.pdf"
+
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f"PDF generation failed: {str(e)}", 500)
