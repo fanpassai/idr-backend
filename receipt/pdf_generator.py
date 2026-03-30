@@ -5,6 +5,7 @@ IDR institutional letterhead. Formatted as professional legal document.
 """
 
 import io
+from html import escape
 from datetime import datetime, timezone
 
 from reportlab.lib.pagesizes import letter
@@ -469,14 +470,14 @@ def generate_pdf(receipt: dict) -> bytes:
                                        alignment=TA_CENTER)
                     ),
                     [
-                        Paragraph(issue.get("description", "")[:100], S["body_small"]),
+                        Paragraph(escape(issue.get("description", ""))[:100], S["body_small"]),
                         Paragraph(
                             f'<font size="7" color="#888888">Element: </font>'
-                            f'<font size="7" fontName="Courier">{issue.get("element", "")[:80]}</font>',
+                            f'<font size="7" fontName="Courier">{escape(issue.get("element", ""))[:80]}</font>',
                             S["body_small"]
                         ),
                         Paragraph(
-                            f'<font size="7" color="#555555">{issue.get("impact", "")[:90]}</font>',
+                            f'<font size="7" color="#555555">{escape(issue.get("impact", ""))[:90]}</font>',
                             S["body_small"]
                         ),
                     ],
@@ -550,7 +551,7 @@ def generate_pdf(receipt: dict) -> bytes:
                                    alignment=TA_CENTER)
                 ),
                 Paragraph(f'WCAG {flag.get("wcag", "")}', S["body_small"]),
-                Paragraph(flag.get("legal_note", "")[:160], S["body_small"]),
+                Paragraph(escape(flag.get("legal_note", ""))[:160], S["body_small"]),
             ])
 
         flag_table = Table(
@@ -646,9 +647,9 @@ def generate_pdf(receipt: dict) -> bytes:
         ]))
         story.append(rem_header)
 
-        # Before / After
-        before_text = rem.get("before", "").replace("\n", "<br/>").replace(" ", "&nbsp;")
-        after_text = rem.get("after", "").replace("\n", "<br/>").replace(" ", "&nbsp;")
+        # Before / After — escape HTML first, then apply display replacements
+        before_text = escape(rem.get("before", "")).replace("\n", "<br/>").replace(" ", "&nbsp;")
+        after_text = escape(rem.get("after", "")).replace("\n", "<br/>").replace(" ", "&nbsp;")
 
         code_table = Table(
             [[Paragraph('<font size="7" color="#888888"><b>BEFORE (VIOLATION)</b></font>', S["label"]),
@@ -666,7 +667,7 @@ def generate_pdf(receipt: dict) -> bytes:
             ("COLPADDING", (0, 0), (-1, -1), 4),
         ]))
         story.append(code_table)
-        story.append(Paragraph(f'Note: {rem.get("note", "")}', S["body_small"]))
+        story.append(Paragraph(f'Note: {escape(rem.get("note", ""))}', S["body_small"]))
         story.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=C_RULE,
                                 spaceAfter=8, spaceBefore=8))
 
