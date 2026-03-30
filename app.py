@@ -1,10 +1,9 @@
 """
-IDR Scanner API - Production build for Railway
+IDR Scanner API - Phase 2A
+Production build with PostgreSQL, email delivery, and evidence logging.
 """
 
 import os
-import sys
-import json
 import traceback
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
@@ -12,30 +11,66 @@ from flask_cors import CORS
 
 from scanner.engine import scan_url
 from receipt.generator import generate_receipt, verify_receipt, format_receipt_summary
+from database import (
+    init_db, save_receipt, get_receipt, get_receipts_by_domain,
+    upsert_registry, get_registry, log_evidence, get_evidence_log,
+    log_scan_alert
+)
+from emailer import send_activation_receipt, send_scan_alert
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['JSON_SORT_KEYS'] = False
 
+# In-memory fallback when no DB
 RECEIPT_STORE = {}
+
+# Initialize database on startup
+db_available = init_db()
 
 
 def _error(message, code):
     return jsonify({"error": message, "status": code}), code
 
 
+def _save(receipt, email=None):
+    """Save to DB if available, fallback to memory."""
+    RECEIPT_STORE[receipt['receipt_id']] = receipt
+    if db_available:
+        domain = receipt.get('scan', {}).get('domain', '')
+        save_receipt(receipt, email)
+        upsert_registry(domain, receipt, email)
+        log_evidence(domain, receipt['receipt_id'], 'SCAN_COMPLETED',
+                     f"Score: {receipt.get('scan',{}).get('overall_score')}/100")
+
+
+def _get(receipt_id):
+    """Get from DB if available, fallback to memory."""
+    if db_available:
+        return get_receipt(receipt_id)
+    return RECEIPT_STORE.get(receipt_id.upper())
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
 @app.route('/', methods=['GET'])
 def root():
-    return jsonify({"service": "IDR Scanner API", "version": "1.0.0", "status": "operational"})
+    return jsonify({
+        "service": "IDR Scanner API",
+        "version": "2.0.0",
+        "status": "operational",
+        "db": "connected" if db_available else "in-memory"
+    })
 
 
 @app.route('/api/status', methods=['GET'])
 def status():
     return jsonify({
         "service": "IDR Scanner API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "protocol": "IDR-BRAND-2026-01",
         "status": "operational",
+        "db": "connected" if db_available else "in-memory",
         "timestamp": datetime.now(timezone.utc).isoformat()
     })
 
@@ -49,22 +84,31 @@ def scan():
         url = body['url'].strip()
         if not url.startswith(('http://', 'https://')):
             return _error("URL must begin with http:// or https://", 400)
+
+        # Log as external scan alert
+        domain = url.replace('https://','').replace('http://','').split('/')[0]
+        scanner_ip = request.remote_addr
+        if db_available:
+            log_scan_alert(domain, scanner_ip, 'public_scan')
+
         result = scan_url(url)
         if result.error:
             return _error(f"Scan failed: {result.error}", 502)
+
         receipt = generate_receipt(result)
-        RECEIPT_STORE[receipt['receipt_id']] = receipt
+        _save(receipt)
+
         return jsonify(receipt), 200
+
     except Exception as e:
+        print(traceback.format_exc())
         return _error(f"Internal error: {str(e)}", 500)
 
 
 @app.route('/api/activate', methods=['POST', 'OPTIONS'])
 def activate():
-    # Handle preflight CORS
     if request.method == 'OPTIONS':
         return '', 200
-
     try:
         body = request.get_json(silent=True)
         if not body:
@@ -76,16 +120,25 @@ def activate():
         if not email or '@' not in email:
             return _error("Valid email required.", 400)
         if not store_url.startswith(('http://', 'https://')):
-            return _error("Valid store URL required (must start with https://).", 400)
+            return _error("Valid store URL required.", 400)
 
         result = scan_url(store_url)
-
         if result.error:
             return _error(f"Could not reach that URL: {result.error}", 502)
 
         receipt = generate_receipt(result)
         receipt['activated_by'] = email
-        RECEIPT_STORE[receipt['receipt_id']] = receipt
+        _save(receipt, email)
+
+        if db_available:
+            log_evidence(
+                result.domain, receipt['receipt_id'],
+                'ACTIVATION',
+                f"Store activated by {email}"
+            )
+
+        # Send receipt email
+        send_activation_receipt(email, receipt)
 
         return jsonify({
             "success": True,
@@ -94,19 +147,21 @@ def activate():
             "registry_url": receipt['registry_url'],
             "score": receipt['scan']['overall_score'],
             "status": receipt['scan']['overall_status'],
-            "email": email
+            "critical_count": receipt['scan']['critical_count'],
+            "total_issues": receipt['scan']['total_issues'],
+            "email": email,
+            "db_saved": db_available
         }), 200
 
     except Exception as e:
-        tb = traceback.format_exc()
-        print(f"ACTIVATE ERROR: {tb}")
+        print(traceback.format_exc())
         return _error(f"Server error: {str(e)}", 500)
 
 
 @app.route('/api/receipt/<receipt_id>', methods=['GET'])
-def get_receipt(receipt_id):
+def get_receipt_route(receipt_id):
     try:
-        receipt = RECEIPT_STORE.get(receipt_id.upper())
+        receipt = _get(receipt_id)
         if not receipt:
             return _error(f"Receipt {receipt_id} not found.", 404)
         return jsonify(receipt), 200
@@ -119,7 +174,7 @@ def verify():
     try:
         receipt = request.get_json(silent=True)
         if not receipt:
-            return _error("Request body must be a receipt JSON object.", 400)
+            return _error("Request body required.", 400)
         result = verify_receipt(receipt)
         return jsonify({
             **result,
@@ -132,8 +187,25 @@ def verify():
 
 
 @app.route('/api/registry/<domain>', methods=['GET'])
-def registry(domain):
+def registry_lookup(domain):
     try:
+        if db_available:
+            reg = get_registry(domain)
+            if not reg:
+                return _error(f"No registry record for {domain}", 404)
+            return jsonify({
+                "domain": reg['domain'],
+                "registry_id": reg['registry_id'],
+                "status": reg['status'],
+                "last_scanned": reg['last_scanned'].isoformat() if reg['last_scanned'] else None,
+                "latest_score": reg['latest_score'],
+                "critical_count": reg['critical_count'],
+                "scan_count": reg['scan_count'],
+                "registry_url": f"https://idrshield.com/verify/{reg['domain']}",
+                "badge_active": reg['badge_active']
+            }), 200
+
+        # Fallback to memory
         matches = [
             r for r in RECEIPT_STORE.values()
             if r.get('scan', {}).get('domain', '').replace('www.', '') == domain.replace('www.', '')
@@ -142,21 +214,52 @@ def registry(domain):
             return _error(f"No records found for domain: {domain}", 404)
         latest = sorted(matches, key=lambda r: r.get('timestamp_utc', ''), reverse=True)[0]
         scan = latest.get('scan', {})
-        status_val = scan.get('overall_status', 'fail')
-        reg_status = "active" if (status_val == 'pass' and scan.get('critical_count', 1) == 0) else "monitoring"
         return jsonify({
             "domain": domain,
             "registry_id": latest.get('registry_id'),
             "last_scanned": latest.get('timestamp_utc'),
             "overall_score": scan.get('overall_score'),
             "overall_status": scan.get('overall_status'),
-            "critical_issues": scan.get('critical_count'),
-            "total_issues": scan.get('total_issues'),
-            "registry_status": reg_status,
-            "receipt_id": latest.get('receipt_id'),
             "registry_url": latest.get('registry_url'),
-            "verified_by": latest.get('verified_by')
         }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/evidence/<domain>', methods=['GET'])
+def evidence_log_route(domain):
+    try:
+        if not db_available:
+            return _error("Evidence log requires database.", 503)
+        log = get_evidence_log(domain)
+        return jsonify({
+            "domain": domain,
+            "entries": log,
+            "count": len(log)
+        }), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+@app.route('/api/badge/<domain>', methods=['GET'])
+def badge_status(domain):
+    """Live badge status endpoint — called by badge.js on every page load."""
+    try:
+        if db_available:
+            reg = get_registry(domain)
+            if not reg:
+                return jsonify({"domain": domain, "status": "expired", "verified": False}), 200
+            return jsonify({
+                "domain": reg['domain'],
+                "status": reg['status'],
+                "last_scanned": reg['last_scanned'].isoformat() if reg['last_scanned'] else None,
+                "score": reg['latest_score'],
+                "verified": True,
+                "registry_url": f"https://idrshield.com/verify/{reg['domain']}"
+            }), 200
+        return jsonify({"domain": domain, "status": "monitoring", "verified": False}), 200
     except Exception as e:
         return _error(str(e), 500)
 
