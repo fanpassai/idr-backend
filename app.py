@@ -1,6 +1,6 @@
 """
-IDR Scanner API - Phase 2A
-Production build with PostgreSQL, email delivery, and evidence logging.
+IDR Scanner API - Phase 2B
+PostgreSQL, email+PDF delivery, Gumroad webhook, weekly cron, badge serving.
 """
 
 import os
@@ -19,6 +19,8 @@ from database import (
     log_scan_alert
 )
 from emailer import send_activation_receipt, send_scan_alert
+from webhook import parse_gumroad_payload, verify_gumroad_signature, is_valid_sale
+from cron import start_cron_scheduler
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -29,6 +31,9 @@ RECEIPT_STORE = {}
 
 # Initialize database on startup
 db_available = init_db()
+
+# Start weekly rescan scheduler
+start_cron_scheduler()
 
 
 def _error(message, code):
@@ -53,13 +58,13 @@ def _get(receipt_id):
     return RECEIPT_STORE.get(receipt_id.upper())
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Core Routes ───────────────────────────────────────────────────────────────
 
 @app.route('/', methods=['GET'])
 def root():
     return jsonify({
         "service": "IDR Scanner API",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "status": "operational",
         "db": "connected" if db_available else "in-memory"
     })
@@ -69,7 +74,7 @@ def root():
 def status():
     return jsonify({
         "service": "IDR Scanner API",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "protocol": "IDR-BRAND-2026-01",
         "status": "operational",
         "db": "connected" if db_available else "in-memory",
@@ -87,7 +92,6 @@ def scan():
         if not url.startswith(('http://', 'https://')):
             return _error("URL must begin with http:// or https://", 400)
 
-        # Log as external scan alert
         domain = url.replace('https://','').replace('http://','').split('/')[0]
         scanner_ip = request.remote_addr
         if db_available:
@@ -139,7 +143,6 @@ def activate():
                 f"Store activated by {email}"
             )
 
-        # Send receipt email
         send_activation_receipt(email, receipt)
 
         return jsonify({
@@ -160,6 +163,103 @@ def activate():
         return _error(f"Server error: {str(e)}", 500)
 
 
+# ── Gumroad Webhook ───────────────────────────────────────────────────────────
+
+@app.route('/api/webhook/gumroad', methods=['POST'])
+def gumroad_webhook():
+    """
+    Receives Gumroad sale ping.
+    Verifies signature, validates payment, triggers activation.
+    Gumroad sends application/x-www-form-urlencoded POST.
+    """
+    try:
+        # Verify signature
+        raw_body = request.get_data()
+        signature = request.headers.get('X-Gumroad-Signature', '')
+        if not verify_gumroad_signature(raw_body, signature):
+            print(f"[WEBHOOK] Invalid signature from {request.remote_addr}")
+            return _error("Invalid signature", 401)
+
+        # Parse payload
+        form_data = request.form.to_dict()
+        parsed = parse_gumroad_payload(form_data)
+
+        print(f"[WEBHOOK] Sale received: {parsed['sale_id']} | "
+              f"{parsed['email']} | {parsed['plan']} | "
+              f"refunded={parsed['refunded']}")
+
+        # Log raw webhook regardless
+        if db_available:
+            log_evidence(
+                parsed.get('store_url', 'unknown').replace('https://','').replace('http://','').split('/')[0],
+                parsed.get('sale_id', 'unknown'),
+                'GUMROAD_WEBHOOK',
+                f"Sale {parsed['sale_id']} | Plan: {parsed['plan']} | "
+                f"Email: {parsed['email']} | Refunded: {parsed['refunded']}"
+            )
+
+        # Validate sale
+        valid, reason = is_valid_sale(parsed)
+        if not valid:
+            print(f"[WEBHOOK] Invalid sale: {reason}")
+            # Return 200 so Gumroad doesn't retry — just don't activate
+            return jsonify({
+                "received": True,
+                "activated": False,
+                "reason": reason
+            }), 200
+
+        # Trigger activation
+        store_url = parsed['store_url']
+        email = parsed['email']
+
+        result = scan_url(store_url)
+        if result.error:
+            print(f"[WEBHOOK] Scan failed for {store_url}: {result.error}")
+            return jsonify({
+                "received": True,
+                "activated": False,
+                "reason": f"Could not scan store URL: {result.error}"
+            }), 200
+
+        receipt = generate_receipt(result)
+        receipt['activated_by'] = email
+        receipt['gumroad_sale_id'] = parsed['sale_id']
+        receipt['plan'] = parsed['plan']
+        _save(receipt, email)
+
+        if db_available:
+            log_evidence(
+                result.domain, receipt['receipt_id'],
+                'GUMROAD_ACTIVATION',
+                f"Activated via Gumroad sale {parsed['sale_id']} | "
+                f"Plan: {parsed['plan']} | Email: {email}"
+            )
+
+        send_activation_receipt(email, receipt)
+
+        print(f"[WEBHOOK] Activation complete: {result.domain} | "
+              f"{result.overall_score}/100 | {email}")
+
+        return jsonify({
+            "received": True,
+            "activated": True,
+            "domain": result.domain,
+            "receipt_id": receipt['receipt_id'],
+            "registry_id": receipt['registry_id'],
+            "score": result.overall_score,
+            "plan": parsed['plan']
+        }), 200
+
+    except Exception as e:
+        print(f"[WEBHOOK] Error: {traceback.format_exc()}")
+        # Always return 200 to Gumroad to prevent retry loops
+        return jsonify({"received": True, "activated": False,
+                        "reason": "Internal error"}), 200
+
+
+# ── Receipt Routes ────────────────────────────────────────────────────────────
+
 @app.route('/api/receipt/<receipt_id>', methods=['GET'])
 def get_receipt_route(receipt_id):
     try:
@@ -169,106 +269,6 @@ def get_receipt_route(receipt_id):
         return jsonify(receipt), 200
     except Exception as e:
         return _error(str(e), 500)
-
-
-@app.route('/api/verify', methods=['POST'])
-def verify():
-    try:
-        receipt = request.get_json(silent=True)
-        if not receipt:
-            return _error("Request body required.", 400)
-        result = verify_receipt(receipt)
-        return jsonify({
-            **result,
-            "receipt_id": receipt.get("receipt_id"),
-            "domain": receipt.get("scan", {}).get("domain"),
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }), 200 if result['valid'] else 409
-    except Exception as e:
-        return _error(str(e), 500)
-
-
-@app.route('/api/registry/<domain>', methods=['GET'])
-def registry_lookup(domain):
-    try:
-        if db_available:
-            reg = get_registry(domain)
-            if not reg:
-                return _error(f"No registry record for {domain}", 404)
-            return jsonify({
-                "domain": reg['domain'],
-                "registry_id": reg['registry_id'],
-                "status": reg['status'],
-                "last_scanned": reg['last_scanned'].isoformat() if reg['last_scanned'] else None,
-                "latest_score": reg['latest_score'],
-                "critical_count": reg['critical_count'],
-                "scan_count": reg['scan_count'],
-                "registry_url": f"https://idrshield.com/verify/{reg['domain']}",
-                "badge_active": reg['badge_active']
-            }), 200
-
-        # Fallback to memory
-        matches = [
-            r for r in RECEIPT_STORE.values()
-            if r.get('scan', {}).get('domain', '').replace('www.', '') == domain.replace('www.', '')
-        ]
-        if not matches:
-            return _error(f"No records found for domain: {domain}", 404)
-        latest = sorted(matches, key=lambda r: r.get('timestamp_utc', ''), reverse=True)[0]
-        scan = latest.get('scan', {})
-        return jsonify({
-            "domain": domain,
-            "registry_id": latest.get('registry_id'),
-            "last_scanned": latest.get('timestamp_utc'),
-            "overall_score": scan.get('overall_score'),
-            "overall_status": scan.get('overall_status'),
-            "registry_url": latest.get('registry_url'),
-        }), 200
-
-    except Exception as e:
-        print(traceback.format_exc())
-        return _error(str(e), 500)
-
-
-@app.route('/api/evidence/<domain>', methods=['GET'])
-def evidence_log_route(domain):
-    try:
-        if not db_available:
-            return _error("Evidence log requires database.", 503)
-        log = get_evidence_log(domain)
-        return jsonify({
-            "domain": domain,
-            "entries": log,
-            "count": len(log)
-        }), 200
-    except Exception as e:
-        return _error(str(e), 500)
-
-
-@app.route('/api/badge/<domain>', methods=['GET'])
-def badge_status(domain):
-    """Live badge status endpoint — called by badge.js on every page load."""
-    try:
-        if db_available:
-            reg = get_registry(domain)
-            if not reg:
-                return jsonify({"domain": domain, "status": "expired", "verified": False}), 200
-            return jsonify({
-                "domain": reg['domain'],
-                "status": reg['status'],
-                "last_scanned": reg['last_scanned'].isoformat() if reg['last_scanned'] else None,
-                "score": reg['latest_score'],
-                "verified": True,
-                "registry_url": f"https://idrshield.com/verify/{reg['domain']}"
-            }), 200
-        return jsonify({"domain": domain, "status": "monitoring", "verified": False}), 200
-    except Exception as e:
-        return _error(str(e), 500)
-
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5050))
-    app.run(host='0.0.0.0', port=port, debug=False)
 
 
 @app.route('/api/receipt/<receipt_id>/pdf', methods=['GET'])
@@ -292,3 +292,118 @@ def download_pdf(receipt_id):
     except Exception as e:
         print(traceback.format_exc())
         return _error(f"PDF generation failed: {str(e)}", 500)
+
+
+@app.route('/api/verify', methods=['POST'])
+def verify():
+    try:
+        receipt = request.get_json(silent=True)
+        if not receipt:
+            return _error("Request body required.", 400)
+        result = verify_receipt(receipt)
+        return jsonify({
+            **result,
+            "receipt_id": receipt.get("receipt_id"),
+            "domain": receipt.get("scan", {}).get("domain"),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }), 200 if result['valid'] else 409
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+# ── Registry & Badge Routes ───────────────────────────────────────────────────
+
+@app.route('/api/registry/<domain>', methods=['GET'])
+def registry_lookup(domain):
+    try:
+        if db_available:
+            reg = get_registry(domain)
+            if not reg:
+                return _error(f"No registry record for {domain}", 404)
+            return jsonify({
+                "domain": reg['domain'],
+                "registry_id": reg['registry_id'],
+                "status": reg['status'],
+                "last_scanned": reg['last_scanned'].isoformat() if reg['last_scanned'] else None,
+                "latest_score": reg['latest_score'],
+                "critical_count": reg['critical_count'],
+                "scan_count": reg['scan_count'],
+                "registry_url": f"https://idrshield.com/verify/{reg['domain']}",
+                "badge_active": reg['badge_active']
+            }), 200
+
+        matches = [
+            r for r in RECEIPT_STORE.values()
+            if r.get('scan', {}).get('domain', '').replace('www.', '') == domain.replace('www.', '')
+        ]
+        if not matches:
+            return _error(f"No records found for domain: {domain}", 404)
+        latest = sorted(matches, key=lambda r: r.get('timestamp_utc', ''), reverse=True)[0]
+        scan = latest.get('scan', {})
+        return jsonify({
+            "domain": domain,
+            "registry_id": latest.get('registry_id'),
+            "last_scanned": latest.get('timestamp_utc'),
+            "overall_score": scan.get('overall_score'),
+            "overall_status": scan.get('overall_status'),
+            "registry_url": latest.get('registry_url'),
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/badge/<domain>', methods=['GET'])
+def badge_status(domain):
+    """Live badge status — called by badge.js on every store page load."""
+    try:
+        if db_available:
+            reg = get_registry(domain)
+            if not reg:
+                return jsonify({
+                    "domain": domain, "status": "expired", "verified": False
+                }), 200
+            return jsonify({
+                "domain": reg['domain'],
+                "status": reg['status'],
+                "last_scanned": reg['last_scanned'].isoformat() if reg['last_scanned'] else None,
+                "score": reg['latest_score'],
+                "verified": True,
+                "registry_url": f"https://idrshield.com/verify/{reg['domain']}"
+            }), 200
+        return jsonify({"domain": domain, "status": "monitoring", "verified": False}), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+@app.route('/api/evidence/<domain>', methods=['GET'])
+def evidence_log_route(domain):
+    try:
+        if not db_available:
+            return _error("Evidence log requires database.", 503)
+        log = get_evidence_log(domain)
+        return jsonify({"domain": domain, "entries": log, "count": len(log)}), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+# ── Cron Trigger (manual override) ───────────────────────────────────────────
+
+@app.route('/api/cron/run', methods=['POST'])
+def trigger_cron():
+    """Manual cron trigger — protected by internal secret."""
+    auth = request.headers.get('X-Cron-Secret', '')
+    if auth != os.environ.get('CRON_SECRET', ''):
+        return _error("Unauthorized", 401)
+    try:
+        from cron import run_cron_cycle
+        run_cron_cycle()
+        return jsonify({"triggered": True}), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5050))
+    app.run(host='0.0.0.0', port=port, debug=False)
