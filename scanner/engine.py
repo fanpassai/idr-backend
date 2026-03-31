@@ -1,13 +1,12 @@
 """
 IDR Scanner Engine — Lightweight build (no Playwright)
 Accessibility audit across 5 categories using requests + BeautifulSoup.
-Covers 90%+ of ADA violations found in e-commerce demand letters.
+Violations are aggregated by rule at source — one row per violation type.
 """
 
 import re
-import hashlib
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional, List
 from urllib.parse import urlparse
 
@@ -30,21 +29,11 @@ class Issue:
 @dataclass
 class CategoryResult:
     name: str
-    status: str        # pass | warning | fail
-    score: int         # 0-100
+    status: str
+    score: int
     issues: List[Issue] = field(default_factory=list)
     critical_count: int = 0
     serious_count: int = 0
-
-    def to_dict(self):
-        return {
-            "name": self.name,
-            "status": self.status,
-            "score": self.score,
-            "issues": [asdict(i) for i in self.issues],
-            "critical_count": self.critical_count,
-            "serious_count": self.serious_count,
-        }
 
 
 @dataclass
@@ -61,27 +50,14 @@ class ScanResult:
     scan_duration_ms: int = 0
     error: Optional[str] = None
 
-    def to_dict(self):
-        return {
-            "url": self.url,
-            "domain": self.domain,
-            "title": self.title,
-            "categories": [c.to_dict() for c in self.categories],
-            "overall_score": self.overall_score,
-            "overall_status": self.overall_status,
-            "critical_count": self.critical_count,
-            "serious_count": self.serious_count,
-            "total_issues": self.total_issues,
-            "scan_duration_ms": self.scan_duration_ms,
-        }
-
 
 def _score(issues, total_checks):
     if total_checks == 0:
         return 100, "pass"
-    critical = sum(1 for i in issues if i.severity == "critical")
-    serious = sum(1 for i in issues if i.severity == "serious")
-    deductions = (critical * 20) + (serious * 10) + (len(issues) - critical - serious) * 3
+    critical = sum(i.count for i in issues if i.severity == "critical")
+    serious = sum(i.count for i in issues if i.severity == "serious")
+    moderate = sum(i.count for i in issues if i.severity == "moderate")
+    deductions = (critical * 20) + (serious * 10) + (moderate * 3)
     score = max(0, 100 - deductions)
     if critical > 0:
         status = "fail"
@@ -92,346 +68,208 @@ def _score(issues, total_checks):
     return score, status
 
 
-# ── Category 1: Image Alt Text ──────────────────────────────────────────────
+def _make_cat(name, issues, checks):
+    score, status = _score(issues, checks)
+    cat = CategoryResult(name=name, status=status, score=score, issues=issues)
+    cat.critical_count = sum(i.count for i in issues if i.severity == "critical")
+    cat.serious_count = sum(i.count for i in issues if i.severity == "serious")
+    return cat
+
 
 def audit_images(soup) -> CategoryResult:
-    issues = []
     images = soup.find_all("img")
     checks = len(images)
+    missing_alts, empty_linked, non_descriptive = [], [], []
 
     for img in images:
         src = img.get("src", "")[:80]
         alt = img.get("alt")
-
         if alt is None:
-            issues.append(Issue(
-                category="Image Alt Text",
-                severity="critical",
-                rule="img-alt-missing",
-                description=f"Image missing alt attribute",
-                element=f'<img src="{src}">',
-                impact="Screen readers cannot describe this image to blind users.",
-                wcag="1.1.1"
-            ))
+            missing_alts.append(src)
         elif alt.strip() == "" and img.parent and img.parent.name == "a":
-            issues.append(Issue(
-                category="Image Alt Text",
-                severity="serious",
-                rule="img-alt-empty-linked",
-                description="Linked image has empty alt text — link purpose unclear",
-                element=f'<a><img src="{src}" alt=""></a>',
-                impact="Screen reader users cannot determine where this link leads.",
-                wcag="1.1.1"
-            ))
+            empty_linked.append(src)
         elif alt and re.match(r'^(image|img|photo|picture|graphic|icon|logo|\.jpg|\.png|\.gif|\.svg)', alt.strip().lower()):
-            issues.append(Issue(
-                category="Image Alt Text",
-                severity="moderate",
-                rule="img-alt-non-descriptive",
-                description=f'Non-descriptive alt text: "{alt.strip()}"',
-                element=f'<img alt="{alt.strip()}" src="{src}">',
-                impact="Alt text does not convey the image's meaning or purpose.",
-                wcag="1.1.1"
-            ))
+            non_descriptive.append((alt.strip(), src))
 
-    score, status = _score(issues, checks)
-    cat = CategoryResult(name="Image Alt Text", status=status, score=score, issues=issues)
-    cat.critical_count = sum(1 for i in issues if i.severity == "critical")
-    cat.serious_count = sum(1 for i in issues if i.severity == "serious")
-    return cat
+    issues = []
+    if missing_alts:
+        issues.append(Issue("Image Alt Text", "critical", "img-alt-missing",
+            f"{len(missing_alts)} image(s) missing alt attribute",
+            f'<img src="{missing_alts[0]}">',
+            "Screen readers cannot describe these images to blind users.", "1.1.1", len(missing_alts)))
+    if empty_linked:
+        issues.append(Issue("Image Alt Text", "serious", "img-alt-empty-linked",
+            f"{len(empty_linked)} linked image(s) have empty alt text — link purpose unclear",
+            f'<a><img src="{empty_linked[0]}" alt=""></a>',
+            "Screen reader users cannot determine where these links lead.", "1.1.1", len(empty_linked)))
+    if non_descriptive:
+        issues.append(Issue("Image Alt Text", "moderate", "img-alt-non-descriptive",
+            f"{len(non_descriptive)} image(s) have non-descriptive alt text",
+            f'<img alt="{non_descriptive[0][0]}" src="{non_descriptive[0][1]}">',
+            "Alt text does not convey the image's meaning or purpose.", "1.1.1", len(non_descriptive)))
 
+    return _make_cat("Image Alt Text", issues, checks)
 
-# ── Category 2: Form Labels ──────────────────────────────────────────────────
 
 def audit_forms(soup) -> CategoryResult:
-    issues = []
     inputs = soup.find_all(["input", "select", "textarea"])
     inputs = [i for i in inputs if i.get("type", "text") not in ("hidden", "submit", "button", "image", "reset")]
     checks = len(inputs)
-
     labels = soup.find_all("label")
     label_fors = {l.get("for"): l for l in labels if l.get("for")}
+    missing_label, placeholder_only = [], []
 
     for inp in inputs:
         inp_id = inp.get("id")
         inp_type = inp.get("type", "text")
         aria_label = inp.get("aria-label") or inp.get("aria-labelledby")
         placeholder = inp.get("placeholder")
-
         has_label = (inp_id and inp_id in label_fors)
         has_aria = bool(aria_label)
-        has_placeholder_only = bool(placeholder and not has_label and not has_aria)
-
         if not has_label and not has_aria:
-            if has_placeholder_only:
-                issues.append(Issue(
-                    category="Form Labels",
-                    severity="serious",
-                    rule="form-label-placeholder-only",
-                    description=f'Input uses placeholder only as label (placeholder="{placeholder}")',
-                    element=f'<input type="{inp_type}" placeholder="{placeholder}">',
-                    impact="Placeholder disappears when typing — users with cognitive disabilities lose context.",
-                    wcag="1.3.1"
-                ))
+            if placeholder:
+                placeholder_only.append((inp_type, placeholder))
             else:
-                issues.append(Issue(
-                    category="Form Labels",
-                    severity="critical",
-                    rule="form-label-missing",
-                    description=f"Form input has no associated label",
-                    element=f'<input type="{inp_type}" id="{inp_id or "no-id"}">',
-                    impact="Screen readers cannot identify the purpose of this field.",
-                    wcag="1.3.1"
-                ))
+                missing_label.append((inp_type, inp_id or "no-id"))
 
-    score, status = _score(issues, checks)
-    cat = CategoryResult(name="Form Labels", status=status, score=score, issues=issues)
-    cat.critical_count = sum(1 for i in issues if i.severity == "critical")
-    cat.serious_count = sum(1 for i in issues if i.severity == "serious")
-    return cat
+    issues = []
+    if missing_label:
+        issues.append(Issue("Form Labels", "critical", "form-label-missing",
+            f"{len(missing_label)} form input(s) have no associated label",
+            f'<input type="{missing_label[0][0]}" id="{missing_label[0][1]}">',
+            "Screen readers cannot identify the purpose of these fields.", "1.3.1", len(missing_label)))
+    if placeholder_only:
+        issues.append(Issue("Form Labels", "serious", "form-label-placeholder-only",
+            f"{len(placeholder_only)} input(s) use placeholder as only label",
+            f'<input type="{placeholder_only[0][0]}" placeholder="{placeholder_only[0][1]}">',
+            "Placeholder disappears on input — users with cognitive disabilities lose context.", "1.3.1", len(placeholder_only)))
 
+    return _make_cat("Form Labels", issues, checks)
 
-# ── Category 3: Keyboard Navigation ─────────────────────────────────────────
 
 def audit_keyboard(soup) -> CategoryResult:
-    issues = []
     checks = 3
-
-    # Check for skip link
+    issues = []
     first_links = soup.find_all("a", limit=5)
-    has_skip = any(
-        "skip" in (a.get_text().lower() + a.get("href", "").lower())
-        for a in first_links
-    )
+    has_skip = any("skip" in (a.get_text().lower() + a.get("href", "").lower()) for a in first_links)
     if not has_skip:
-        issues.append(Issue(
-            category="Keyboard Navigation",
-            severity="serious",
-            rule="skip-link-missing",
-            description="No skip navigation link found",
-            element="<body> — no skip link in first 5 links",
-            impact="Keyboard users must tab through all navigation on every page load.",
-            wcag="2.4.1"
-        ))
+        issues.append(Issue("Keyboard Navigation", "serious", "skip-link-missing",
+            "No skip navigation link found", "<body> — no skip link in first 5 links",
+            "Keyboard users must tab through entire navigation on every page load.", "2.4.1", 1))
 
-    # Check for main landmark
     has_main = bool(soup.find("main") or soup.find(attrs={"role": "main"}))
     if not has_main:
-        issues.append(Issue(
-            category="Keyboard Navigation",
-            severity="serious",
-            rule="landmark-main-missing",
-            description="No <main> landmark element found",
-            element="<body>",
-            impact="Screen reader users cannot jump directly to main content.",
-            wcag="2.4.1"
-        ))
+        issues.append(Issue("Keyboard Navigation", "serious", "landmark-main-missing",
+            "No <main> landmark element found", "<body>",
+            "Screen reader users cannot jump directly to main content.", "2.4.1", 1))
 
-    # Check for tabindex=-1 on interactive elements
     bad_tabindex = soup.find_all(["a", "button", "input", "select"], tabindex="-1")
     if bad_tabindex:
-        issues.append(Issue(
-            category="Keyboard Navigation",
-            severity="critical",
-            rule="tabindex-negative-interactive",
-            description=f"{len(bad_tabindex)} interactive element(s) have tabindex=-1",
-            element=str(bad_tabindex[0])[:80],
-            impact="These elements are unreachable by keyboard navigation.",
-            wcag="2.1.1",
-            count=len(bad_tabindex)
-        ))
+        issues.append(Issue("Keyboard Navigation", "critical", "tabindex-negative-interactive",
+            f"{len(bad_tabindex)} interactive element(s) have tabindex=-1",
+            str(bad_tabindex[0])[:80],
+            "These elements are unreachable by keyboard navigation.", "2.1.1", len(bad_tabindex)))
 
-    score, status = _score(issues, checks)
-    cat = CategoryResult(name="Keyboard Navigation", status=status, score=score, issues=issues)
-    cat.critical_count = sum(1 for i in issues if i.severity == "critical")
-    cat.serious_count = sum(1 for i in issues if i.severity == "serious")
-    return cat
+    return _make_cat("Keyboard Navigation", issues, checks)
 
-
-# ── Category 4: Heading Structure ────────────────────────────────────────────
 
 def audit_headings(soup) -> CategoryResult:
-    issues = []
     headings = soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6"])
     checks = max(len(headings), 1)
+    issues = []
 
     h1s = [h for h in headings if h.name == "h1"]
     if not h1s:
-        issues.append(Issue(
-            category="Heading Structure",
-            severity="serious",
-            rule="heading-h1-missing",
-            description="Page has no H1 heading",
-            element="<body>",
-            impact="Screen readers and search engines cannot identify the page's primary topic.",
-            wcag="2.4.6"
-        ))
+        issues.append(Issue("Heading Structure", "serious", "heading-h1-missing",
+            "Page has no H1 heading", "<body>",
+            "Screen readers and search engines cannot identify the page's primary topic.", "2.4.6", 1))
     elif len(h1s) > 1:
-        issues.append(Issue(
-            category="Heading Structure",
-            severity="moderate",
-            rule="heading-h1-multiple",
-            description=f"Page has {len(h1s)} H1 headings (should have exactly one)",
-            element=str(h1s[1])[:80],
-            impact="Document structure is ambiguous for screen reader users.",
-            wcag="2.4.6",
-            count=len(h1s)
-        ))
+        issues.append(Issue("Heading Structure", "moderate", "heading-h1-multiple",
+            f"Page has {len(h1s)} H1 headings (should have exactly one)",
+            str(h1s[1])[:80],
+            "Document structure is ambiguous for screen reader users.", "2.4.6", len(h1s)))
 
-    # Check for empty headings
     empty = [h for h in headings if not h.get_text(strip=True)]
     if empty:
-        issues.append(Issue(
-            category="Heading Structure",
-            severity="serious",
-            rule="heading-empty",
-            description=f"{len(empty)} empty heading(s) found",
-            element=str(empty[0])[:80],
-            impact="Screen readers announce empty headings, confusing navigation.",
-            wcag="2.4.6",
-            count=len(empty)
-        ))
+        issues.append(Issue("Heading Structure", "serious", "heading-empty",
+            f"{len(empty)} empty heading(s) found", str(empty[0])[:80],
+            "Screen readers announce empty headings, confusing navigation.", "2.4.6", len(empty)))
 
-    # Check for skipped heading levels
     levels = [int(h.name[1]) for h in headings]
     for i in range(1, len(levels)):
-        if levels[i] > levels[i-1] + 1:
-            issues.append(Issue(
-                category="Heading Structure",
-                severity="moderate",
-                rule="heading-level-skipped",
-                description=f"Heading level skipped: H{levels[i-1]} → H{levels[i]}",
-                element=str(headings[i])[:80],
-                impact="Heading hierarchy is broken, making document navigation unreliable.",
-                wcag="1.3.1"
-            ))
+        if levels[i] > levels[i - 1] + 1:
+            issues.append(Issue("Heading Structure", "moderate", "heading-level-skipped",
+                f"Heading level skipped: H{levels[i-1]} to H{levels[i]}",
+                str(headings[i])[:80],
+                "Heading hierarchy is broken, making document navigation unreliable.", "1.3.1", 1))
             break
 
-    score, status = _score(issues, checks)
-    cat = CategoryResult(name="Heading Structure", status=status, score=score, issues=issues)
-    cat.critical_count = sum(1 for i in issues if i.severity == "critical")
-    cat.serious_count = sum(1 for i in issues if i.severity == "serious")
-    return cat
+    return _make_cat("Heading Structure", issues, checks)
 
-
-# ── Category 5: ARIA, Links & Buttons ───────────────────────────────────────
 
 def audit_aria_links(soup) -> CategoryResult:
-    issues = []
     all_links = soup.find_all("a")
     all_buttons = soup.find_all("button")
-    checks = len(all_links) + len(all_buttons)
+    checks = max(len(all_links) + len(all_buttons), 1)
+    issues = []
 
-    # Empty links
-    empty_links = [
-        a for a in all_links
-        if not a.get_text(strip=True) and not a.find("img") and not a.get("aria-label")
-    ]
+    empty_links = [a for a in all_links
+                   if not a.get_text(strip=True) and not a.find("img") and not a.get("aria-label")]
     if empty_links:
-        issues.append(Issue(
-            category="ARIA & Links",
-            severity="critical",
-            rule="link-empty",
-            description=f"{len(empty_links)} link(s) have no text content",
-            element=str(empty_links[0])[:80],
-            impact="Screen readers cannot describe where these links lead.",
-            wcag="2.4.4",
-            count=len(empty_links)
-        ))
+        issues.append(Issue("ARIA & Links", "critical", "link-empty",
+            f"{len(empty_links)} link(s) have no text content",
+            str(empty_links[0])[:80],
+            "Screen readers cannot describe where these links lead.", "2.4.4", len(empty_links)))
 
-    # Generic link text
     generic_texts = {"click here", "here", "read more", "more", "learn more", "click", "link", "this"}
-    generic_links = [
-        a for a in all_links
-        if a.get_text(strip=True).lower() in generic_texts
-    ]
+    generic_links = [a for a in all_links if a.get_text(strip=True).lower() in generic_texts]
     if generic_links:
-        issues.append(Issue(
-            category="ARIA & Links",
-            severity="serious",
-            rule="link-text-generic",
-            description=f"{len(generic_links)} link(s) use generic text (e.g. 'click here', 'read more')",
-            element=str(generic_links[0])[:80],
-            impact="Out of context, these links convey no destination or purpose.",
-            wcag="2.4.4",
-            count=len(generic_links)
-        ))
+        issues.append(Issue("ARIA & Links", "serious", "link-text-generic",
+            f"{len(generic_links)} link(s) use generic text ('click here', 'read more')",
+            str(generic_links[0])[:80],
+            "Out of context, these links convey no destination or purpose.", "2.4.4", len(generic_links)))
 
-    # Empty buttons
-    empty_buttons = [
-        b for b in all_buttons
-        if not b.get_text(strip=True) and not b.get("aria-label") and not b.find("img")
-    ]
+    empty_buttons = [b for b in all_buttons
+                     if not b.get_text(strip=True) and not b.get("aria-label") and not b.find("img")]
     if empty_buttons:
-        issues.append(Issue(
-            category="ARIA & Links",
-            severity="critical",
-            rule="button-empty",
-            description=f"{len(empty_buttons)} button(s) have no accessible name",
-            element=str(empty_buttons[0])[:80],
-            impact="Screen readers cannot describe what these buttons do.",
-            wcag="4.1.2",
-            count=len(empty_buttons)
-        ))
+        issues.append(Issue("ARIA & Links", "critical", "button-empty",
+            f"{len(empty_buttons)} button(s) have no accessible name",
+            str(empty_buttons[0])[:80],
+            "Screen readers cannot describe what these buttons do.", "4.1.2", len(empty_buttons)))
 
-    # Duplicate IDs
     all_ids = [el.get("id") for el in soup.find_all(id=True)]
-    seen = set()
-    dupes = set()
+    seen, dupes = set(), set()
     for id_val in all_ids:
         if id_val in seen:
             dupes.add(id_val)
         seen.add(id_val)
     if dupes:
-        issues.append(Issue(
-            category="ARIA & Links",
-            severity="serious",
-            rule="duplicate-id",
-            description=f"{len(dupes)} duplicate ID(s) found: {', '.join(list(dupes)[:3])}",
-            element=f'id="{list(dupes)[0]}"',
-            impact="Duplicate IDs break ARIA relationships and confuse assistive technology.",
-            wcag="4.1.1",
-            count=len(dupes)
-        ))
+        sample = ", ".join(list(dupes)[:3])
+        issues.append(Issue("ARIA & Links", "serious", "duplicate-id",
+            f"{len(dupes)} duplicate ID(s) found: {sample}",
+            f'id="{list(dupes)[0]}"',
+            "Duplicate IDs break ARIA relationships and confuse assistive technology.", "4.1.1", len(dupes)))
 
-    # Invalid ARIA roles
     valid_roles = {
-        "alert","alertdialog","application","article","banner","button","cell",
-        "checkbox","columnheader","combobox","complementary","contentinfo",
-        "definition","dialog","directory","document","feed","figure","form",
-        "grid","gridcell","group","heading","img","link","list","listbox",
-        "listitem","log","main","marquee","math","menu","menubar","menuitem",
-        "menuitemcheckbox","menuitemradio","navigation","none","note","option",
-        "presentation","progressbar","radio","radiogroup","region","row",
-        "rowgroup","rowheader","scrollbar","search","searchbox","separator",
-        "slider","spinbutton","status","switch","tab","table","tablist",
-        "tabpanel","term","textbox","timer","toolbar","tooltip","tree",
-        "treegrid","treeitem"
+        "alert","alertdialog","application","article","banner","button","cell","checkbox",
+        "columnheader","combobox","complementary","contentinfo","definition","dialog",
+        "directory","document","feed","figure","form","grid","gridcell","group","heading",
+        "img","link","list","listbox","listitem","log","main","marquee","math","menu",
+        "menubar","menuitem","menuitemcheckbox","menuitemradio","navigation","none","note",
+        "option","presentation","progressbar","radio","radiogroup","region","row","rowgroup",
+        "rowheader","scrollbar","search","searchbox","separator","slider","spinbutton",
+        "status","switch","tab","table","tablist","tabpanel","term","textbox","timer",
+        "toolbar","tooltip","tree","treegrid","treeitem"
     }
-    invalid_roles = [
-        el for el in soup.find_all(role=True)
-        if el.get("role") not in valid_roles
-    ]
+    invalid_roles = [el for el in soup.find_all(role=True) if el.get("role") not in valid_roles]
     if invalid_roles:
-        issues.append(Issue(
-            category="ARIA & Links",
-            severity="moderate",
-            rule="aria-role-invalid",
-            description=f"{len(invalid_roles)} element(s) have invalid ARIA roles",
-            element=str(invalid_roles[0])[:80],
-            impact="Invalid roles are ignored or misinterpreted by assistive technology.",
-            wcag="4.1.1",
-            count=len(invalid_roles)
-        ))
+        issues.append(Issue("ARIA & Links", "moderate", "aria-role-invalid",
+            f"{len(invalid_roles)} element(s) have invalid ARIA roles",
+            str(invalid_roles[0])[:80],
+            "Invalid roles are ignored or misinterpreted by assistive technology.", "4.1.1", len(invalid_roles)))
 
-    score, status = _score(issues, checks if checks > 0 else 1)
-    cat = CategoryResult(name="ARIA & Links", status=status, score=score, issues=issues)
-    cat.critical_count = sum(1 for i in issues if i.severity == "critical")
-    cat.serious_count = sum(1 for i in issues if i.severity == "serious")
-    return cat
+    return _make_cat("ARIA & Links", issues, checks)
 
-
-# ── Main scan function ───────────────────────────────────────────────────────
 
 def scan_url(url: str) -> ScanResult:
     start = time.time()
@@ -466,25 +304,15 @@ def scan_url(url: str) -> ScanResult:
         audit_aria_links(soup),
     ]
 
-    all_issues = [i for cat in categories for i in cat.issues]
     critical = sum(c.critical_count for c in categories)
     serious = sum(c.serious_count for c in categories)
-    total = len(all_issues)
-
+    total = sum(i.count for cat in categories for i in cat.issues)
     avg_score = sum(c.score for c in categories) // len(categories)
-    if critical > 0:
-        overall_status = "fail"
-    elif avg_score >= 80:
-        overall_status = "pass"
-    else:
-        overall_status = "warning"
-
+    overall_status = "fail" if critical > 0 else ("pass" if avg_score >= 80 else "warning")
     duration_ms = int((time.time() - start) * 1000)
 
     return ScanResult(
-        url=url,
-        domain=domain,
-        title=title,
+        url=url, domain=domain, title=title,
         categories=categories,
         overall_score=avg_score,
         overall_status=overall_status,
