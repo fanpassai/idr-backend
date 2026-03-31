@@ -164,32 +164,28 @@ class ScoreBadge(Flowable):
         self.score = score
         self.status = status
         self.width = width
-        self.height = 1.6*inch
+        self.height = 1.8*inch
 
     def draw(self):
         c = self.canv
         sc = {"pass": C_PASS, "warning": C_WARNING, "fail": C_FAIL}.get(self.status, C_FAIL)
 
-        # Layout from bottom up:
-        # 0.18" — /100 baseline
-        # 0.55" — score baseline (44pt cap-height ~0.44" → top at 0.99")
-        # 1.20" — badge bottom (gap of 0.21" above score top)
-        # 1.48" — badge top
+        # Draw order bottom → top to guarantee no overlap
 
-        # /100
+        # /100  — bottom
         c.setFont("Helvetica", 12)
         c.setFillColor(C_DARK_GRAY)
-        c.drawCentredString(self.width/2, 0.18*inch, "/ 100")
+        c.drawCentredString(self.width/2, 0.15*inch, "/ 100")
 
-        # Score number — 44pt keeps top below badge bottom
-        c.setFont("Helvetica-Bold", 44)
+        # Score number — 38pt cap-height ~0.38", top ≈ 0.53+0.38 = 0.91"
+        c.setFont("Helvetica-Bold", 38)
         c.setFillColor(C_VOID)
-        c.drawCentredString(self.width/2, 0.55*inch, str(self.score))
+        c.drawCentredString(self.width/2, 0.53*inch, str(self.score))
 
-        # Status badge — clear above score
+        # Status badge — bottom at 1.10", well above score top of 0.91"
         bw, bh = 1.1*inch, 0.28*inch
         bx = (self.width - bw) / 2
-        by = 1.20*inch
+        by = 1.10*inch
         c.setFillColor(sc)
         c.roundRect(bx, by, bw, bh, 4, fill=1, stroke=0)
         c.setFont("Helvetica-Bold", 8.5)
@@ -331,9 +327,14 @@ def generate_pdf(receipt: dict) -> bytes:
                   ("TOPPADDING", (0,0),(0,0), 7), ("BOTTOMPADDING", (0,0),(0,0), 7),
               ])),
         sp(0.08),
-        Paragraph('<font size="6.5" color="#888888"><b>ESTIMATED DEMAND RANGE</b></font>', ST["label"]),
+        Paragraph('<font size="6.5" color="#888888"><b>OBSERVED RANGE — COMPARABLE CASES</b></font>', ST["label"]),
         Paragraph(f'<font size="15" color="#C0392B"><b>{settle["formatted_low"]} – {settle["formatted_high"]}</b></font>',
                   ParagraphStyle("dr", fontName="Helvetica-Bold", fontSize=15, textColor=HexColor("#C0392B"))),
+        sp(0.04),
+        Paragraph('<font size="7" color="#aaaaaa"><i>Typical ranges observed in similar accessibility claims. '
+                  'Not a prediction of any specific legal action.</i></font>',
+                  ParagraphStyle("disc", fontName="Helvetica-Oblique", fontSize=7,
+                                 textColor=HexColor("#aaaaaa"), leading=10)),
         sp(0.05),
         Paragraph('<font size="6.5" color="#888888"><b>DEMAND PROBABILITY</b></font>', ST["label"]),
         Paragraph(e(plaintiff["demand_probability"]), ST["val"]),
@@ -369,6 +370,21 @@ def generate_pdf(receipt: dict) -> bytes:
     story.append(stats_table)
     story.append(sp(0.08))
     story.append(Paragraph(e(plaintiff["description"]), ST["legal"]))
+    if status == "fail":
+        story.append(Paragraph(
+            '<font color="#888888"><i>Note: A FAIL score indicates the presence of unresolved '
+            'accessibility barriers — not total non-compliance. Documented remediation effort '
+            'is recognized as a mitigating factor in ADA demand letter negotiations.</i></font>',
+            ParagraphStyle("fn", fontName="Helvetica-Oblique", fontSize=7.5,
+                           textColor=HexColor("#888888"), leading=11, spaceBefore=4)))
+    story.append(Paragraph(
+        '<font color="#C0392B"><b>Stores without active monitoring lose their defense record '
+        'continuity.</b></font> Each lapsed scan creates a gap in your documented compliance '
+        'posture — the exact gap plaintiff firms look for.',
+        ParagraphStyle("urg", fontName="Helvetica", fontSize=8,
+                       textColor=HexColor("#444444"), leading=12,
+                       spaceBefore=6, borderPad=6,
+                       backColor=HexColor("#FFF8F5"), leftIndent=8, rightIndent=8)))
     story.append(sp(0.18))
 
     # ── §04 CATEGORY BREAKDOWN ────────────────────────────────────────────────
@@ -450,6 +466,11 @@ def generate_pdf(receipt: dict) -> bytes:
         "would evaluate this site as a litigation target. IDR uses the same scanning methodology "
         "employed by plaintiff firms — the difference is who runs it first.",
         ST["legal"]))
+    story.append(Paragraph(
+        "This simulation reflects common patterns observed in accessibility-related claims "
+        "and does not represent a specific legal action or prediction of litigation.",
+        ParagraphStyle("sim_disc", fontName="Helvetica-Oblique", fontSize=7.5,
+                       textColor=HexColor("#888888"), leading=11, spaceBefore=2)))
     story.append(sp(0.1))
 
     # Litigation flags — deduplicated
