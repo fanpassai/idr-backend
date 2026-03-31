@@ -6,6 +6,7 @@ Falls back gracefully if SENDGRID_API_KEY not set.
 
 import os
 import json
+import base64
 from datetime import datetime, timezone
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
@@ -13,7 +14,8 @@ FROM_EMAIL = os.environ.get('FROM_EMAIL', 'hello@idrshield.com')
 FROM_NAME = 'Institute of Digital Remediation'
 
 
-def _send(to_email: str, subject: str, html_body: str, text_body: str = None) -> bool:
+def _send(to_email: str, subject: str, html_body: str,
+          text_body: str = None, attachments: list = None) -> bool:
     if not SENDGRID_API_KEY:
         print(f"[EMAIL SKIPPED — no API key] To: {to_email} | Subject: {subject}")
         return False
@@ -28,9 +30,12 @@ def _send(to_email: str, subject: str, html_body: str, text_body: str = None) ->
             "subject": subject,
             "content": [
                 {"type": "text/plain", "value": text_body or subject},
-                {"type": "text/html", "value": html_body}
+                {"type": "text/html",  "value": html_body}
             ]
         }
+
+        if attachments:
+            payload["attachments"] = attachments
 
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(
@@ -63,6 +68,23 @@ def send_activation_receipt(email: str, receipt: dict) -> bool:
     critical = scan.get('critical_count', 0)
     total = scan.get('total_issues', 0)
     hash_val = receipt.get('hash', {}).get('value', '')
+
+    # Generate PDF attachment
+    attachments = []
+    try:
+        from receipt.pdf_generator import generate_pdf
+        pdf_bytes = generate_pdf(receipt)
+        pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+        filename = f"IDR-Receipt-{domain}-{receipt_id[:8]}.pdf"
+        attachments = [{
+            "content": pdf_b64,
+            "type": "application/pdf",
+            "filename": filename,
+            "disposition": "attachment"
+        }]
+        print(f"PDF attached: {filename} ({len(pdf_bytes):,} bytes)")
+    except Exception as e:
+        print(f"PDF generation for email failed (sending without): {e}")
 
     status_color = '#e05555' if status == 'FAIL' else ('#f0a500' if status == 'WARNING' else '#50c878')
 
@@ -166,7 +188,7 @@ Institute of Digital Remediation
 hello@idrshield.com | idrshield.com
 """
 
-    return _send(email, subject, html, text)
+    return _send(email, subject, html, text, attachments=attachments)
 
 
 def send_scan_alert(email: str, domain: str, scanner_ip: str, findings: dict) -> bool:
