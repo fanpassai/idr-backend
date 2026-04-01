@@ -21,29 +21,63 @@ from database import (
 )
 
 
-# Maps the issue category slugs (used in fix_requests) to the
-# axe-core rule IDs / scan result keys used in scanner output.
-CATEGORY_MAP = {
-    "alt_text":         "alt_text",
-    "form_labels":      "form_labels",
-    "keyboard_nav":     "keyboard_nav",
-    "heading_structure":"heading_structure",
-    "contrast":         "contrast",
-    "aria_links":       "aria_links",
+# ── Slug mapping ──────────────────────────────────────────────────────────────
+#
+# The merchant-facing API uses friendly slugs (VALID_CATEGORIES in app.py).
+# The receipt generator creates slugs from the scanner's display names via:
+#     name.lower().replace(" ", "_").replace("&", "and")
+#
+# Scanner category names → generated slugs:
+#   "Image Alt Text"     → "image_alt_text"
+#   "Form Labels"        → "form_labels"
+#   "Keyboard Navigation"→ "keyboard_navigation"
+#   "Heading Structure"  → "heading_structure"
+#   "ARIA & Links"       → "aria_and_links"
+#
+# This table maps the merchant-facing API slugs to the receipt slugs.
+# Add new rows here whenever the scanner grows a new category.
+
+API_SLUG_TO_RECEIPT_SLUG = {
+    "alt_text":          "image_alt_text",
+    "form_labels":       "form_labels",
+    "keyboard_nav":      "keyboard_navigation",
+    "heading_structure": "heading_structure",
+    "contrast":          None,   # not yet in scanner — always returns 0
+    "aria_links":        "aria_and_links",
 }
 
 
-def _count_issues_by_category(scan_result: dict) -> dict:
+def _build_category_counts(receipt: dict) -> dict:
     """
-    Pull per-category issue counts out of a scan receipt.
-    Returns {category_slug: issue_count}
+    Build a lookup of {receipt_slug: issue_count} from a scan receipt.
+
+    The receipt stores categories as a LIST of objects:
+        [{"name": "Image Alt Text", "slug": "image_alt_text", "failed": 3, ...}, ...]
+
+    The issue count field is "failed" (number of failing checks in that category).
     """
-    categories = scan_result.get("scan", {}).get("categories", {})
     counts = {}
-    for slug, mapped_key in CATEGORY_MAP.items():
-        cat = categories.get(mapped_key, categories.get(slug, {}))
-        counts[slug] = int(cat.get("issues_count", cat.get("count", 0)))
+    categories = receipt.get("scan", {}).get("categories", [])
+
+    # categories is always a list — never a dict
+    for cat in categories:
+        slug  = cat.get("slug", "")
+        count = int(cat.get("failed", cat.get("issues_count", cat.get("count", 0))))
+        if slug:
+            counts[slug] = count
+
     return counts
+
+
+def _get_count_for_api_slug(api_slug: str, receipt_counts: dict) -> int:
+    """
+    Translate an API-facing category slug to a receipt slug,
+    then return the issue count. Returns 0 if no mapping or not found.
+    """
+    receipt_slug = API_SLUG_TO_RECEIPT_SLUG.get(api_slug)
+    if receipt_slug is None:
+        return 0  # category not in scanner (e.g. "contrast")
+    return receipt_counts.get(receipt_slug, 0)
 
 
 def run_confirmation_scan(domain: str, triggered_by: str = "system") -> dict:
@@ -68,16 +102,16 @@ def run_confirmation_scan(domain: str, triggered_by: str = "system") -> dict:
     """
     clean = domain.replace("www.", "")
     result = {
-        "domain": clean,
+        "domain":         clean,
         "new_receipt_id": None,
-        "new_score": None,
-        "confirmed": [],
-        "partial": [],
-        "failed": [],
-        "no_pending": False,
-        "error": None,
-        "triggered_by": triggered_by,
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "new_score":      None,
+        "confirmed":      [],
+        "partial":        [],
+        "failed":         [],
+        "no_pending":     False,
+        "error":          None,
+        "triggered_by":   triggered_by,
+        "timestamp_utc":  datetime.now(timezone.utc).isoformat(),
     }
 
     # ── 1. Fetch pending fix requests ─────────────────────────────────────────
@@ -86,14 +120,13 @@ def run_confirmation_scan(domain: str, triggered_by: str = "system") -> dict:
         result["no_pending"] = True
         return result
 
-    # ── 2. Pull the original scan to get baseline counts ──────────────────────
-    # We grab the counts from the first pending fix_request's receipt
     original_receipt_id = pending[0].get("receipt_id")
-    original_counts = {}
-    for req in pending:
-        original_counts[req["issue_category"]] = req.get("issue_count", 0)
+    original_counts = {
+        req["issue_category"]: req.get("issue_count", 0)
+        for req in pending
+    }
 
-    # ── 3. Run fresh scan ─────────────────────────────────────────────────────
+    # ── 2. Run fresh scan ─────────────────────────────────────────────────────
     url = f"https://{clean}"
     scan_result = scan_url(url)
     if scan_result.error:
@@ -105,67 +138,62 @@ def run_confirmation_scan(domain: str, triggered_by: str = "system") -> dict:
 
     new_receipt = generate_receipt(scan_result)
     new_receipt["confirmation_for"] = original_receipt_id
-    new_receipt["triggered_by"] = triggered_by
+    new_receipt["triggered_by"]     = triggered_by
 
     # Save to DB
     save_receipt(new_receipt)
     upsert_registry(clean, new_receipt)
 
     new_receipt_id = new_receipt["receipt_id"]
-    new_score = new_receipt.get("scan", {}).get("overall_score", 0)
+    new_score      = new_receipt.get("scan", {}).get("overall_score", 0)
     result["new_receipt_id"] = new_receipt_id
-    result["new_score"] = new_score
+    result["new_score"]      = new_score
 
-    # Log the confirmation scan itself
     log_evidence(clean, new_receipt_id, "CONFIRMATION_SCAN_STARTED",
-                 f"Triggered by: {triggered_by} | Checking {len(pending)} fix request(s)")
+                 f"Triggered by: {triggered_by} | "
+                 f"Checking {len(pending)} fix request(s)")
 
-    # ── 4. Diff new results vs. reported fixes ────────────────────────────────
-    new_counts = _count_issues_by_category(new_receipt)
+    # ── 3. Diff new results vs. reported fixes ────────────────────────────────
+    # Build {receipt_slug: count} lookup from new receipt — categories is a LIST
+    new_receipt_counts = _build_category_counts(new_receipt)
 
     for req in pending:
         req_id       = req["id"]
-        category     = req["issue_category"]
+        api_slug     = req["issue_category"]
         original_cnt = req.get("issue_count", 0)
-        new_cnt      = new_counts.get(category, 0)
+        new_cnt      = _get_count_for_api_slug(api_slug, new_receipt_counts)
 
         entry = {
             "id":             req_id,
-            "category":       category,
+            "category":       api_slug,
             "original_count": original_cnt,
             "new_count":      new_cnt,
         }
 
         if new_cnt == 0:
-            # All issues in this category cleared
             status = "confirmed"
-            detail = (f"FIXED — {category}: was {original_cnt} issues, "
+            detail = (f"FIXED — {api_slug}: was {original_cnt} issues, "
                       f"now 0 after confirmation scan {new_receipt_id}")
             result["confirmed"].append(entry)
 
         elif new_cnt < original_cnt:
-            # Partially fixed
             status = "partial"
-            detail = (f"PARTIAL — {category}: reduced from {original_cnt} "
+            detail = (f"PARTIAL — {api_slug}: reduced from {original_cnt} "
                       f"to {new_cnt} (confirmation scan {new_receipt_id})")
             result["partial"].append(entry)
 
         else:
-            # No improvement detected
             status = "failed"
-            detail = (f"NOT RESOLVED — {category}: still {new_cnt} issues "
+            detail = (f"NOT RESOLVED — {api_slug}: still {new_cnt} issues "
                       f"(was {original_cnt}, confirmation scan {new_receipt_id})")
             result["failed"].append(entry)
 
-        # Update the fix_request record
         update_fix_request(req_id, status, new_receipt_id)
-
-        # Write to evidence log
         log_evidence(clean, new_receipt_id,
                      f"FIX_{status.upper()}",
                      detail)
 
-    # ── 5. Final summary evidence entry ───────────────────────────────────────
+    # ── 4. Final summary evidence entry ───────────────────────────────────────
     confirmed_n = len(result["confirmed"])
     partial_n   = len(result["partial"])
     failed_n    = len(result["failed"])
