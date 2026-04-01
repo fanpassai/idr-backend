@@ -239,6 +239,20 @@ def gumroad_webhook():
     """
     try:
         form_data = request.form.to_dict()
+
+        # Log full payload for debugging
+        print(f"[WEBHOOK] Raw payload keys: {list(form_data.keys())}")
+        print(f"[WEBHOOK] email={form_data.get('email')} "
+              f"sale_id={form_data.get('sale_id')} "
+              f"seller_id={form_data.get('seller_id','')[:12]}... "
+              f"test={form_data.get('test')}")
+        # Log any custom field keys
+        cf_keys = [k for k in form_data.keys() if 'custom' in k.lower() or 'store' in k.lower()]
+        if cf_keys:
+            print(f"[WEBHOOK] Custom field keys: {cf_keys}")
+            for k in cf_keys:
+                print(f"[WEBHOOK]   {k} = {form_data.get(k)}")
+
         parsed = parse_gumroad_payload(form_data)
 
         print(f"[WEBHOOK] Sale: {parsed['sale_id']} | "

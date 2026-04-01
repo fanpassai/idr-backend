@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+# Force Python stdout/stderr to flush immediately — required for Railway logs
+ENV PYTHONUNBUFFERED=1
+
 # Set working directory
 WORKDIR /app
 
