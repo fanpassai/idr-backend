@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL = os.environ.get('FROM_EMAIL', 'hello@idrshield.com')
 FROM_NAME  = 'Institute of Digital Remediation'
-GUMROAD_URL = 'https://gum.co/idrshield'
+GUMROAD_URL = os.environ.get('GUMROAD_URL', 'https://gum.co/idrshield')
 
 
 def _send(to_email: str, subject: str, html_body: str,
@@ -351,13 +351,163 @@ Institute of Digital Remediation · idrshield.com
 # Convenience wrappers (used by app.py and cron)
 # ────────────────────────────────────────────────────────────────────────────
 
+def send_badge_setup(email: str, receipt: dict) -> bool:
+    """
+    Email 4 — Badge setup instructions.
+    Sent after the Defense Package. Covers both HTML embed and PNG image options.
+    """
+    scan        = receipt.get('scan', {})
+    domain      = scan.get('domain', 'your store')
+    registry_id = receipt.get('registry_id', '')
+    registry_url = receipt.get('registry_url', '')
+
+    badge_code = (
+        f'&lt;script src="https://idrshield.com/badge.js"<br>'
+        f'&nbsp;&nbsp;data-store="{domain}"<br>'
+        f'&nbsp;&nbsp;data-registry="{registry_id}"&gt;<br>'
+        f'&lt;/script&gt;'
+    )
+
+    subject = f"Add your IDR Verified badge — {domain}"
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Georgia,serif;background:#f5f5f5;margin:0;padding:40px 20px;">
+<div style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">
+
+  <div style="background:#080d1a;padding:28px 36px;border-bottom:3px solid #C4A052;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.25em;text-transform:uppercase;color:rgba(196,160,82,0.6);margin:0 0 6px;">Institute of Digital Remediation</p>
+    <h1 style="font-size:22px;font-weight:normal;color:#F0E8D8;margin:0;">Add Your IDR Verified Badge</h1>
+    <p style="font-family:Arial,sans-serif;font-size:12px;color:rgba(240,232,216,0.45);margin:6px 0 0;">{domain}</p>
+  </div>
+
+  <div style="padding:24px 36px;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.7;margin:0;">
+      Your IDR Verified badge is live and ready. Every visitor who clicks it sees your
+      publicly verifiable registry record — proof your store takes accessibility seriously.
+      Choose the installation method that matches your setup below.
+    </p>
+  </div>
+
+  <!-- OPTION A: Code embed -->
+  <div style="padding:24px 36px;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#C4A052;margin:0 0 6px;">Option A — For Custom / Coded Stores</p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.7;margin:0 0 12px;">
+      Paste this code snippet into your store footer HTML. Works on Shopify (theme.liquid), WooCommerce, and any custom site.
+    </p>
+    <div style="background:#0d1526;padding:16px;border-radius:4px;border-left:3px solid #C4A052;margin-bottom:12px;">
+      <code style="font-family:'Courier New',monospace;font-size:11px;color:#C8E6C9;line-height:1.8;">
+        {badge_code}
+      </code>
+    </div>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#888;margin:0;">
+      The badge loads automatically, shows your live compliance status, and links to your registry record.
+    </p>
+  </div>
+
+  <!-- OPTION B: Shopify step by step -->
+  <div style="padding:24px 36px;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#C4A052;margin:0 0 6px;">Option B — Shopify (Step by Step)</p>
+    <ol style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:2;margin:0;padding-left:20px;">
+      <li>Go to <strong>Online Store → Themes → Edit Code</strong></li>
+      <li>Open <strong>Sections → footer.liquid</strong> (or footer-group.json)</li>
+      <li>Paste the code above just before the closing <code style="background:#f0f0f0;padding:1px 4px;">&lt;/footer&gt;</code> tag</li>
+      <li>Click <strong>Save</strong></li>
+      <li>Visit your store — the IDR badge will appear in your footer</li>
+    </ol>
+  </div>
+
+  <!-- OPTION C: Drag and drop / image -->
+  <div style="padding:24px 36px;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#C4A052;margin:0 0 6px;">Option C — Drag & Drop Builders (Wix, Squarespace, Webflow)</p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.7;margin:0 0 12px;">
+      If your website builder doesn't support custom code in the footer, use the badge image instead:
+    </p>
+    <ol style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:2;margin:0 0 12px;padding-left:20px;">
+      <li>Download your IDR badge image from: <a href="https://idrshield.com/badge-image/{domain}" style="color:#C4A052;">idrshield.com/badge-image/{domain}</a></li>
+      <li>Upload the image to your website footer section</li>
+      <li>Set the image link to: <strong>{registry_url}</strong></li>
+      <li>Alt text: <em>IDR Verified — Accessibility Compliance Badge</em></li>
+    </ol>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#888;margin:0;">
+      The image badge is static — it displays your verified status as of your last scan.
+      The code version updates automatically with every weekly scan.
+    </p>
+  </div>
+
+  <!-- Registry verification -->
+  <div style="padding:24px 36px;background:#fafaf5;border-bottom:1px solid #e8e4dc;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 8px;">Your Registry Record</p>
+    <a href="{registry_url}" style="font-family:Arial,sans-serif;font-size:13px;color:#0645AD;">{registry_url}</a>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#888;margin:8px 0 0;">
+      This is the page your badge links to. Share it with customers, legal counsel, or anyone who asks about your accessibility compliance.
+    </p>
+  </div>
+
+  <div style="padding:16px 36px;background:#080d1a;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;color:rgba(240,232,216,0.35);margin:0;line-height:1.6;">
+      Institute of Digital Remediation · idrshield.com · hello@idrshield.com<br>
+      IDR-PROTOCOL-2026 · This is not legal advice.
+    </p>
+  </div>
+
+</div>
+</body></html>"""
+
+    text = f"""ADD YOUR IDR VERIFIED BADGE
+{domain}
+
+OPTION A — Code embed (Shopify / custom sites)
+Paste into your footer HTML:
+<script src="https://idrshield.com/badge.js"
+  data-store="{domain}"
+  data-registry="{registry_id}">
+</script>
+
+OPTION B — Shopify step by step
+1. Online Store → Themes → Edit Code
+2. Open Sections → footer.liquid
+3. Paste the code above before </footer>
+4. Save
+
+OPTION C — Drag & drop (Wix, Squarespace, Webflow)
+Download badge image: https://idrshield.com/badge-image/{domain}
+Upload to footer, link to: {registry_url}
+
+Registry: {registry_url}
+
+Institute of Digital Remediation · idrshield.com
+"""
+    return _send(email, subject, html, text)
+
+
 def send_activation_receipt(email: str, receipt: dict) -> bool:
     """
-    Full purchase flow: Email 2 + Email 3.
-    Called by Gumroad webhook after successful payment.
+    Full purchase flow — fired by Gumroad webhook.
+    Email 2: Founding Member Welcome (fires immediately)
+    Email 3: Defense Package PDF (fires after 90 second delay)
+    Email 4: Badge Setup (fires after another 90 second delay)
     """
+    import threading
+
+    # Email 2 — fires immediately
     send_founding_member_welcome(email, receipt)
-    send_defense_package_pdf(email, receipt)
+
+    # Email 3 — fires after 90 seconds in background thread
+    def send_pdf_delayed():
+        import time
+        time.sleep(90)
+        send_defense_package_pdf(email, receipt)
+
+    # Email 4 — fires after 3 minutes in background thread
+    def send_badge_delayed():
+        import time
+        time.sleep(180)
+        send_badge_setup(email, receipt)
+
+    threading.Thread(target=send_pdf_delayed, daemon=True).start()
+    threading.Thread(target=send_badge_delayed, daemon=True).start()
+
     return True
 
 
