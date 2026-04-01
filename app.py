@@ -142,12 +142,14 @@ def scan():
         receipt = generate_receipt(result)
         _save(receipt)  # Save full receipt internally
 
-        # Tag in Kit if email provided
+        # Tag in Kit + send Email 1 if email provided
         if email and '@' in email:
             try:
                 on_free_scan(email, domain)
+                from emailer import send_free_scan_summary
+                send_free_scan_summary(email, receipt)
             except Exception:
-                pass  # Never block scan on Kit failure
+                pass  # Never block scan on email/Kit failure
 
         # Return summary only — gate the details
         return jsonify(_summary_only(receipt)), 200
