@@ -1,76 +1,93 @@
 """
-IDR Webhook Handler — Gumroad payment verification
-Receives Gumroad sale pings, verifies payment, triggers activation.
+IDR Webhook Handler — Gumroad Ping verification
+Gumroad sends sale data as form-encoded POST to the Ping endpoint.
+Validation uses seller_id matching, not HMAC signature.
 """
 
 import os
-import hmac
-import hashlib
 import json
 from datetime import datetime, timezone
 
 
-GUMROAD_WEBHOOK_SECRET = os.environ.get('GUMROAD_WEBHOOK_SECRET', '')
+# Your Gumroad seller_id — visible in Settings → Advanced
+# Set as env var: GUMROAD_SELLER_ID=AHFXde0wKu1at1UEzZUNyRg==
+GUMROAD_SELLER_ID = os.environ.get('GUMROAD_SELLER_ID', '')
 
 # Product permalink → plan mapping
 GUMROAD_PRODUCTS = {
-    'idrshield':         'founding',   # $97 Founding Activation
-    'idrshield-pro':     'pro',        # $29/month Pro
-    'idrshield-basic':   'basic',      # $9/month Basic
+    'idrshield':       'founding',   # $97 Founding Activation
+    'idrshield-pro':   'pro',        # $29/month Pro
+    'idrshield-basic': 'basic',      # $9/month Basic
 }
 
 
-def verify_gumroad_signature(payload_body: bytes, signature: str) -> bool:
+def verify_gumroad_seller(seller_id: str) -> bool:
     """
-    Verify the Gumroad webhook signature.
-    Gumroad signs with HMAC-SHA256 using your webhook secret.
+    Validate that the ping came from your Gumroad account.
+    Gumroad Ping includes seller_id in every payload.
+    If GUMROAD_SELLER_ID env var is not set, skip validation (dev mode).
     """
-    if not GUMROAD_WEBHOOK_SECRET:
-        # If no secret configured, skip verification (dev mode)
-        print("WARNING: GUMROAD_WEBHOOK_SECRET not set — skipping signature verification")
+    if not GUMROAD_SELLER_ID:
+        print("[WEBHOOK] WARNING: GUMROAD_SELLER_ID not set — skipping seller validation")
         return True
 
-    try:
-        expected = hmac.new(
-            GUMROAD_WEBHOOK_SECRET.encode('utf-8'),
-            payload_body,
-            hashlib.sha256
-        ).hexdigest()  # hmac.new is the correct call (alias for hmac.HMAC)
-        return hmac.compare_digest(expected, signature or '')
-    except Exception as e:
-        print(f"Signature verification error: {e}")
+    if not seller_id:
+        print("[WEBHOOK] No seller_id in payload")
         return False
+
+    match = seller_id.strip() == GUMROAD_SELLER_ID.strip()
+    if not match:
+        print(f"[WEBHOOK] seller_id mismatch: got '{seller_id[:8]}...' "
+              f"expected '{GUMROAD_SELLER_ID[:8]}...'")
+    return match
 
 
 def parse_gumroad_payload(form_data: dict) -> dict:
     """
-    Parse Gumroad webhook form POST into clean activation data.
-    Gumroad sends form-encoded data, not JSON.
+    Parse Gumroad Ping form POST into clean activation data.
+    Gumroad sends application/x-www-form-urlencoded.
+
+    Custom fields set up on the product (e.g. store_url) come through
+    as custom_fields[store_url] in the form data.
     """
-    # Gumroad sends custom_fields as JSON string if you set them up
-    # We use the 'url' custom field for the store URL
-    custom_fields = {}
-    try:
-        cf_raw = form_data.get('custom_fields', '{}')
-        if isinstance(cf_raw, str):
-            custom_fields = json.loads(cf_raw)
-    except Exception:
-        pass
+    # Gumroad sends custom fields as custom_fields[field_name]
+    # Try both formats: nested key and JSON string
+    store_url = ''
+
+    # Format 1: custom_fields[store_url] as direct form key
+    store_url = form_data.get('custom_fields[store_url]', '').strip()
+
+    # Format 2: custom_fields as JSON string
+    if not store_url:
+        try:
+            cf_raw = form_data.get('custom_fields', '{}')
+            if isinstance(cf_raw, str) and cf_raw:
+                custom_fields = json.loads(cf_raw)
+                store_url = custom_fields.get('store_url', '').strip()
+        except Exception:
+            pass
+
+    # Format 3: store_url directly in form data (fallback)
+    if not store_url:
+        store_url = form_data.get('store_url', '').strip()
 
     return {
-        'email':         form_data.get('email', '').strip(),
-        'store_url':     custom_fields.get('store_url', '').strip(),
-        'sale_id':       form_data.get('sale_id', ''),
-        'product_id':    form_data.get('product_id', ''),
-        'permalink':     form_data.get('permalink', ''),
-        'price':         form_data.get('price', '0'),
-        'currency':      form_data.get('currency', 'USD'),
-        'refunded':      form_data.get('refunded', 'false').lower() == 'true',
-        'disputed':      form_data.get('disputed', 'false').lower() == 'true',
-        'timestamp':     datetime.now(timezone.utc).isoformat(),
-        'plan':          GUMROAD_PRODUCTS.get(
-                             form_data.get('permalink', ''), 'standard'
-                         ),
+        'email':      form_data.get('email', '').strip(),
+        'store_url':  store_url,
+        'sale_id':    form_data.get('sale_id', ''),
+        'seller_id':  form_data.get('seller_id', ''),
+        'product_id': form_data.get('product_id', ''),
+        'permalink':  form_data.get('permalink', ''),
+        'price':      form_data.get('price', '0'),
+        'currency':   form_data.get('currency', 'USD'),
+        'full_name':  form_data.get('full_name', ''),
+        'refunded':   str(form_data.get('refunded', 'false')).lower() == 'true',
+        'disputed':   str(form_data.get('disputed', 'false')).lower() == 'true',
+        'test':       str(form_data.get('test', 'false')).lower() == 'true',
+        'timestamp':  datetime.now(timezone.utc).isoformat(),
+        'plan':       GUMROAD_PRODUCTS.get(
+                          form_data.get('permalink', ''), 'standard'
+                      ),
     }
 
 
@@ -89,9 +106,16 @@ def is_valid_sale(parsed: dict) -> tuple:
         return False, "No valid email in payload"
 
     if not parsed.get('store_url'):
-        return False, "No store_url in custom fields — customer must provide store URL"
+        return False, (
+            "No store_url provided. Make sure your Gumroad product has a "
+            "custom field named 'store_url' that customers fill in at checkout."
+        )
 
-    if not parsed['store_url'].startswith(('http://', 'https://')):
-        return False, f"Invalid store_url: {parsed['store_url']}"
+    url = parsed['store_url']
+    if not url.startswith(('http://', 'https://')):
+        # Try adding https:// if missing
+        parsed['store_url'] = 'https://' + url
+        if not parsed['store_url'].startswith('https://'):
+            return False, f"Invalid store_url: {url}"
 
     return True, "OK"
