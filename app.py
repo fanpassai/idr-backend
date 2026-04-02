@@ -6,7 +6,7 @@ Production build with PostgreSQL, email delivery, and evidence logging.
 import os
 import traceback
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, make_response
 from flask_cors import CORS
 import io
 
@@ -22,6 +22,7 @@ from database import (
 )
 from emailer import send_activation_receipt, send_scan_alert, send_fix_confirmation_email
 from confirmation import run_confirmation_scan
+from badge_image import badge_for_domain, render_badge
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -477,6 +478,49 @@ def download_pdf(receipt_id):
     except Exception as e:
         print(traceback.format_exc())
         return _error(f"PDF generation failed: {str(e)}", 500)
+
+
+
+# ── Badge PNG Image Generator ─────────────────────────────────────────────────
+
+@app.route('/badge-image/<domain>', methods=['GET'])
+def badge_image(domain):
+    """
+    Returns a PNG badge image for a domain.
+
+    Live registry lookup by default.
+    Override with ?status=active&score=84 for email embeds.
+
+    Usage in email:
+      <img src="https://idr-backend-production.up.railway.app/badge-image/yourstore.com"
+           width="220" height="52" alt="IDR Shield Verified">
+    """
+    try:
+        override_status = request.args.get('status', '').strip().lower()
+        override_score  = request.args.get('score', '').strip()
+
+        if override_status in ('active', 'monitoring', 'expired'):
+            score = int(override_score) if override_score.isdigit() else None
+            png   = render_badge(status=override_status, score=score)
+        else:
+            png, _, _ = badge_for_domain(
+                domain=domain.replace('www.', ''),
+                get_registry_fn=get_registry,
+            )
+
+        response = make_response(png)
+        response.headers['Content-Type']  = 'image/png'
+        response.headers['Cache-Control'] = 'public, max-age=3600'
+        response.headers['X-IDR-Domain']  = domain
+        return response
+
+    except Exception as e:
+        print(traceback.format_exc())
+        fallback = render_badge(status='monitoring')
+        response = make_response(fallback)
+        response.headers['Content-Type']  = 'image/png'
+        response.headers['Cache-Control'] = 'public, max-age=300'
+        return response
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
