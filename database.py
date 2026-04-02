@@ -10,16 +10,34 @@ import psycopg2
 import psycopg2.extras
 from datetime import datetime, timezone
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+_RAW_URL = os.environ.get('DATABASE_URL', '')
+
+def _build_url():
+    """Railway provides postgres:// — psycopg2 requires postgresql://"""
+    url = _RAW_URL
+    if url.startswith('postgres://'):
+        url = 'postgresql://' + url[len('postgres://'):]
+    return url
+
+DATABASE_URL = _build_url()
 
 # ── Connection ────────────────────────────────────────────────────────────────
 
 def get_conn():
     if not DATABASE_URL:
         return None
-    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
-    conn.autocommit = True
-    return conn
+    try:
+        conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+        conn.autocommit = True
+        return conn
+    except Exception:
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            conn.autocommit = True
+            return conn
+        except Exception as e:
+            print(f"DB connection error: {e}")
+            return None
 
 
 # ── Schema Setup ─────────────────────────────────────────────────────────────
