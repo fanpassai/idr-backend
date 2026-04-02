@@ -38,8 +38,8 @@ _STATUS_COLORS = {
 }
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
-_W_OUT, _H_OUT = 220, 52   # final output size in CSS pixels
-_SCALE         = 2          # render at 2× then downsample for crisp edges
+_W_OUT, _H_OUT = 440, 104  # 2× retina output — crisp on all screens
+_SCALE         = 2          # render at 2× internally then output at full size
 
 
 # ── Font resolution ───────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ def render_badge(
     )
 
     # ── Downsample to output resolution ──────────────────────────────────
-    final = img.resize((_W_OUT, _H_OUT), Image.LANCZOS)
+    final = img  # already at output resolution — no downsampling needed
 
     buf = io.BytesIO()
     final.save(buf, format='PNG', optimize=True)
