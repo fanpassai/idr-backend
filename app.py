@@ -6,7 +6,7 @@ Production build with PostgreSQL, email delivery, and evidence logging.
 import os
 import traceback
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, send_file, make_response
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import io
 
@@ -20,9 +20,11 @@ from database import (
     create_fix_request, get_fix_requests_by_domain,
     update_fix_request, get_all_pending_fix_domains
 )
-from emailer import send_activation_receipt, send_scan_alert, send_fix_confirmation_email
+from emailer import send_activation_receipt, send_scan_alert, send_fix_confirmation_email, send_free_summary_email
 from confirmation import run_confirmation_scan
-from badge_image import badge_for_domain, render_badge
+from webhook import parse_gumroad_payload, verify_gumroad_seller, is_valid_sale
+from kit_integration import on_purchase
+from cron import start_cron_scheduler
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -33,6 +35,7 @@ RECEIPT_STORE = {}
 
 # Initialize database on startup
 db_available = init_db()
+start_cron_scheduler()
 
 
 def _error(message, code):
@@ -481,46 +484,116 @@ def download_pdf(receipt_id):
 
 
 
-# ── Badge PNG Image Generator ─────────────────────────────────────────────────
+# ── Free Visitor Summary Email ────────────────────────────────────────────────
 
-@app.route('/badge-image/<domain>', methods=['GET'])
-def badge_image(domain):
+@app.route('/api/scan/summary-email', methods=['POST', 'OPTIONS'])
+def summary_email():
     """
-    Returns a PNG badge image for a domain.
-
-    Live registry lookup by default.
-    Override with ?status=active&score=84 for email embeds.
-
-    Usage in email:
-      <img src="https://idr-backend-production.up.railway.app/badge-image/yourstore.com"
-           width="220" height="52" alt="IDR Shield Verified">
+    Sends a free scan summary email to a visitor.
+    Called automatically after every free scan on the scanner page.
+    Also callable manually via the "Email me my summary" button.
+    Body: { email: str, receipt: dict }
     """
+    if request.method == 'OPTIONS':
+        return '', 200
     try:
-        override_status = request.args.get('status', '').strip().lower()
-        override_score  = request.args.get('score', '').strip()
-
-        if override_status in ('active', 'monitoring', 'expired'):
-            score = int(override_score) if override_score.isdigit() else None
-            png   = render_badge(status=override_status, score=score)
-        else:
-            png, _, _ = badge_for_domain(
-                domain=domain.replace('www.', ''),
-                get_registry_fn=get_registry,
-            )
-
-        response = make_response(png)
-        response.headers['Content-Type']  = 'image/png'
-        response.headers['Cache-Control'] = 'public, max-age=3600'
-        response.headers['X-IDR-Domain']  = domain
-        return response
-
+        body    = request.get_json(silent=True)
+        if not body:
+            return _error('Request body required.', 400)
+        email   = body.get('email', '').strip()
+        receipt = body.get('receipt', {})
+        if not email or '@' not in email:
+            return _error('Valid email required.', 400)
+        if not receipt:
+            return _error('Receipt data required.', 400)
+        send_free_summary_email(email, receipt)
+        return jsonify({'success': True, 'email': email}), 200
     except Exception as e:
         print(traceback.format_exc())
-        fallback = render_badge(status='monitoring')
-        response = make_response(fallback)
-        response.headers['Content-Type']  = 'image/png'
-        response.headers['Cache-Control'] = 'public, max-age=300'
-        return response
+        return _error(f'Email error: {str(e)}', 500)
+
+
+# ── Gumroad Webhook ───────────────────────────────────────────────────────────
+
+@app.route('/api/webhook/gumroad', methods=['POST'])
+def gumroad_webhook():
+    """
+    Gumroad Ping endpoint.
+    Verifies seller_id → validates sale → scans store →
+    saves receipt → emails welcome + PDF → tags in Kit.
+    """
+    try:
+        form_data = request.form.to_dict()
+        parsed = parse_gumroad_payload(form_data)
+
+        print(f"[WEBHOOK] Sale: {parsed['sale_id']} | "
+              f"{parsed['email']} | plan={parsed['plan']} | "
+              f"test={parsed['test']} | refunded={parsed['refunded']}")
+
+        if not verify_gumroad_seller(parsed.get('seller_id', '')):
+            print(f"[WEBHOOK] seller_id failed from {request.remote_addr}")
+            return _error("Unauthorized", 401)
+
+        if db_available and parsed.get('email'):
+            domain_raw = parsed.get('store_url', 'unknown')
+            domain_log = domain_raw.replace('https://','').replace('http://','').split('/')[0]
+            log_evidence(domain_log, parsed.get('sale_id', 'ping'),
+                         'GUMROAD_PING',
+                         f"Sale {parsed['sale_id']} | {parsed['email']} | "
+                         f"refunded={parsed['refunded']}")
+
+        valid, reason = is_valid_sale(parsed)
+        if not valid:
+            print(f"[WEBHOOK] Invalid: {reason}")
+            return jsonify({"received": True, "activated": False,
+                            "reason": reason}), 200
+
+        email     = parsed['email']
+        store_url = parsed['store_url']
+        plan      = parsed['plan']
+        domain    = store_url.replace('https://','').replace('http://','').split('/')[0].replace('www.','')
+
+        result = scan_url(store_url)
+        if result.error:
+            print(f"[WEBHOOK] Scan failed for {store_url}: {result.error}")
+            return jsonify({"received": True, "activated": False,
+                            "reason": f"Scan failed: {result.error}"}), 200
+
+        receipt = generate_receipt(result)
+        receipt['activated_by'] = email
+        receipt['gumroad_sale_id'] = parsed['sale_id']
+        receipt['plan'] = plan
+        _save(receipt, email)
+
+        if db_available:
+            log_evidence(domain, receipt['receipt_id'],
+                         'GUMROAD_ACTIVATION',
+                         f"Sale {parsed['sale_id']} | plan={plan}")
+
+        send_activation_receipt(email, receipt)
+
+        try:
+            on_purchase(email=email, domain=domain, plan=plan,
+                        receipt_id=receipt['receipt_id'])
+        except Exception as ke:
+            print(f"[WEBHOOK] Kit tagging failed (non-fatal): {ke}")
+
+        print(f"[WEBHOOK] Activated: {domain} | {email} | {receipt['receipt_id']}")
+
+        return jsonify({
+            "received":   True,
+            "activated":  True,
+            "domain":     result.domain,
+            "receipt_id": receipt['receipt_id'],
+            "registry_id":receipt['registry_id'],
+            "score":      result.overall_score,
+            "plan":       plan
+        }), 200
+
+    except Exception as e:
+        print(f"[WEBHOOK] Error: {traceback.format_exc()}")
+        return jsonify({"received": True, "activated": False,
+                        "reason": "Internal error"}), 200
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
