@@ -424,3 +424,232 @@ def send_weekly_scan_alert(email: str, domain: str,
 </body></html>"""
 
     return _send(email, subject, html)
+
+
+def send_free_summary_email(email: str, receipt: dict) -> bool:
+    """
+    Free visitor summary email — sent automatically after every public scan.
+    Shows score + top issues + upsell into $97 Defense Package.
+    Subject lines tested for open rate.
+    """
+    scan       = receipt.get('scan', {})
+    domain     = scan.get('domain', 'your store')
+    score      = scan.get('overall_score', 0)
+    status     = scan.get('overall_status', 'fail').upper()
+    critical   = scan.get('critical_count', 0)
+    total      = scan.get('total_issues', 0)
+    cats       = scan.get('categories', [])
+    receipt_id = receipt.get('receipt_id', '')
+    registry_url = receipt.get('registry_url', f'https://idrshield.com/verify/{domain}')
+
+    # Risk level copy
+    if critical >= 5:
+        risk_line = f'<strong style="color:#e05555;">{critical} critical issues</strong> were detected — this is a high legal-risk profile.'
+        subject   = f'Your store flagged {critical} critical ADA issues — {domain}'
+    elif critical >= 1:
+        risk_line = f'<strong style="color:#e09060;">{critical} critical issue{"s" if critical != 1 else ""}</strong> detected. Elevated risk profile.'
+        subject   = f'Your IDR scan result for {domain}'
+    elif total >= 1:
+        risk_line = f'No critical issues — but {total} total issue{"s" if total != 1 else ""} were found that should be addressed.'
+        subject   = f'Your store scan is ready — {domain}'
+    else:
+        risk_line = 'No accessibility issues detected. Your store is clean.'
+        subject   = f'Your store passed — {domain}'
+
+    # Status color
+    status_color = '#e05555' if status == 'FAIL' else ('#f0a500' if status == 'WARNING' else '#27AE60')
+
+    # Category rows
+    cat_rows_html = ''
+    for cat in cats[:5]:
+        failed = cat.get('failed', 0)
+        if failed == 0:
+            dot_color, count_str = '#27AE60', 'Clean'
+        elif cat.get('score', 100) < 70:
+            dot_color, count_str = '#e05555', f'{failed} issue{"s" if failed != 1 else ""}'
+        else:
+            dot_color, count_str = '#f0a500', f'{failed} issue{"s" if failed != 1 else ""}'
+        cat_rows_html += f'''
+        <tr>
+          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;font-size:14px;color:#333;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{dot_color};margin-right:10px;vertical-align:middle;"></span>
+            {cat.get('name', '')}
+          </td>
+          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;text-align:right;font-family:Arial,sans-serif;font-size:13px;color:#666;">{count_str}</td>
+        </tr>'''
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:Georgia,serif;background:#f5f5f5;margin:0;padding:40px 20px;">
+<div style="max-width:580px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">
+
+  <!-- Header -->
+  <div style="background:#080d1a;padding:32px 40px;border-bottom:3px solid #C9A84C;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 8px;">Institute of Digital Remediation</p>
+    <h1 style="font-size:22px;font-weight:normal;color:#F0E8D8;margin:0;">Your Store Scan Results</h1>
+    <p style="font-size:13px;color:rgba(240,232,216,0.45);margin:6px 0 0;font-family:Arial,sans-serif;">{domain}</p>
+  </div>
+
+  <!-- Score block -->
+  <div style="background:#0d1526;padding:28px 40px;border-bottom:1px solid rgba(201,168,76,0.2);text-align:center;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 10px;">Overall Score</p>
+    <div style="font-size:60px;font-weight:bold;color:#F0E8D8;line-height:1;">{score}</div>
+    <div style="font-size:18px;color:rgba(240,232,216,0.35);margin-bottom:14px;">/ 100</div>
+    <span style="background:{status_color};color:#fff;font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.1em;padding:5px 20px;border-radius:20px;">{status}</span>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:rgba(240,232,216,0.5);margin:14px 0 0;">{risk_line}</p>
+  </div>
+
+  <!-- Category breakdown -->
+  <div style="padding:28px 40px;border-bottom:1px solid #e0e0e0;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 16px;">Issue Categories</p>
+    <table style="width:100%;border-collapse:collapse;">
+      {cat_rows_html}
+    </table>
+  </div>
+
+  <!-- What's locked -->
+  <div style="padding:28px 40px;background:#fafaf8;border-bottom:1px solid #e0e0e0;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 14px;">This summary doesn't include</p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#666;line-height:1.8;margin:0;">
+      🔒 &nbsp;10-section legal-grade Defense Package PDF<br>
+      🔒 &nbsp;Before/after remediation code for every issue<br>
+      🔒 &nbsp;Plaintiff simulation layer &amp; legal positioning<br>
+      🔒 &nbsp;SHA-256 Scan Receipt — your immutable evidence record<br>
+      🔒 &nbsp;IDR Verified badge + weekly monitoring
+    </p>
+  </div>
+
+  <!-- Upsell CTA -->
+  <div style="padding:32px 40px;text-align:center;border-bottom:1px solid #e0e0e0;">
+    <p style="font-family:Georgia,serif;font-size:16px;color:#333;line-height:1.7;margin:0 0 20px;">
+      The full Defense Package gives you the documentation, remediation guidance, and legal positioning to defend your store.
+    </p>
+    <a href="https://gum.co/idrshield" style="display:inline-block;background:#C9A84C;color:#080d1a;font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;padding:16px 36px;text-decoration:none;border-radius:3px;">
+      Unlock Full Defense Package — $97
+    </a>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#999;margin:12px 0 0;">Founding price &nbsp;·&nbsp; 30 days free &nbsp;·&nbsp; $29/month thereafter</p>
+  </div>
+
+  <!-- Registry link -->
+  <div style="padding:20px 40px;border-bottom:1px solid #e0e0e0;">
+    <p style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 6px;">Your Registry Record</p>
+    <a href="{registry_url}" style="color:#C9A84C;font-size:13px;">{registry_url}</a>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#bbb;margin:6px 0 0;">Publicly verifiable. Anyone can confirm your compliance record.</p>
+  </div>
+
+  <!-- Footer -->
+  <div style="padding:20px 40px;background:#080d1a;">
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:rgba(240,232,216,0.3);margin:0;line-height:1.6;">
+      Scan Receipt: {receipt_id[:16]}…&nbsp;·&nbsp; Institute of Digital Remediation&nbsp;·&nbsp; idrshield.com<br>
+      Not a law firm. This is a compliance documentation system.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>"""
+
+    text = f"""IDR SCAN RESULTS — {domain}
+
+Score: {score}/100 — {status}
+Critical Issues: {critical}
+Total Issues: {total}
+
+This is a summary only. Your full Defense Package — including remediation guidance, legal positioning, and SHA-256 receipt — is available at:
+
+https://gum.co/idrshield
+
+Founding price — $97 | 30 days free | $29/month thereafter
+
+Registry record: {registry_url}
+
+Institute of Digital Remediation
+hello@idrshield.com | idrshield.com
+"""
+
+    return _send(email, subject, html, text)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Fix Confirmation Email — sent after confirmation scan completes
+# ────────────────────────────────────────────────────────────────────────────
+
+def send_fix_confirmation_email(email: str, domain: str, result: dict) -> bool:
+    """
+    Sent to merchant after a confirmation scan resolves their reported fixes.
+    Shows which issues were confirmed fixed, still present, or newly detected.
+    """
+    confirmed  = result.get('confirmed_fixed', [])
+    still_open = result.get('still_present', [])
+    new_issues = result.get('new_issues', [])
+    new_score  = result.get('new_score', 0)
+    old_score  = result.get('original_score', 0)
+    delta      = result.get('score_delta', 0)
+    delta_sign = '+' if delta >= 0 else ''
+
+    subject = f"IDR Confirmation Scan — {domain}"
+
+    confirmed_rows  = ''.join(
+        f'<tr><td style="padding:6px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;font-size:13px;color:#27AE60;">✓ {c.get("rule_id","")}</td></tr>'
+        for c in confirmed
+    ) or '<tr><td style="padding:6px 0;font-family:Arial,sans-serif;font-size:13px;color:#999;">No issues confirmed fixed yet.</td></tr>'
+
+    open_rows = ''.join(
+        f'<tr><td style="padding:6px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;font-size:13px;color:#E67E22;">⚠ {s.get("rule_id","")}</td></tr>'
+        for s in still_open
+    )
+
+    new_rows = ''.join(
+        f'<tr><td style="padding:6px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;font-size:13px;color:#C0392B;">✗ {n.get("rule_id","")}</td></tr>'
+        for n in new_issues
+    )
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Georgia,serif;background:#f5f5f5;margin:0;padding:40px 20px;">
+<div style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">
+
+  <div style="background:#080d1a;padding:28px 36px;border-bottom:3px solid #C4A052;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(196,160,82,0.6);margin:0 0 6px;">Institute of Digital Remediation</p>
+    <h1 style="font-size:22px;font-weight:normal;color:#F0E8D8;margin:0;">Confirmation Scan Complete</h1>
+    <p style="font-family:Arial,sans-serif;font-size:12px;color:rgba(240,232,216,0.45);margin:6px 0 0;">{domain}</p>
+  </div>
+
+  <div style="padding:28px 36px;text-align:center;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 8px;">New Score</p>
+    <div style="font-size:52px;font-weight:700;color:#080d1a;line-height:1;">{new_score}</div>
+    <div style="font-size:13px;color:#999;margin-bottom:8px;">/ 100</div>
+    <span style="font-family:Arial,sans-serif;font-size:13px;font-weight:700;color:{'#27AE60' if delta >= 0 else '#C0392B'};">{delta_sign}{delta} points from {old_score}</span>
+  </div>
+
+  <div style="padding:24px 36px;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#27AE60;margin:0 0 10px;">Confirmed Fixed</p>
+    <table style="width:100%;border-collapse:collapse;">{confirmed_rows}</table>
+  </div>
+
+  {'<div style="padding:24px 36px;border-bottom:1px solid #f0ede6;"><p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#E67E22;margin:0 0 10px;">Still Present</p><table style="width:100%;border-collapse:collapse;">' + open_rows + '</table></div>' if still_open else ''}
+
+  {'<div style="padding:24px 36px;border-bottom:1px solid #f0ede6;"><p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#C0392B;margin:0 0 10px;">New Issues Detected</p><table style="width:100%;border-collapse:collapse;">' + new_rows + '</table></div>' if new_issues else ''}
+
+  <div style="padding:20px 36px;background:#080d1a;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;color:rgba(240,232,216,0.35);margin:0;line-height:1.6;">
+      Institute of Digital Remediation · idrshield.com · hello@idrshield.com<br>
+      IDR-PROTOCOL-2026 · This is not legal advice.
+    </p>
+  </div>
+
+</div>
+</body></html>"""
+
+    text = f"""IDR CONFIRMATION SCAN — {domain}
+
+New Score: {new_score}/100 ({delta_sign}{delta} from {old_score})
+
+Confirmed Fixed: {len(confirmed)}
+Still Present: {len(still_open)}
+New Issues: {len(new_issues)}
+
+Institute of Digital Remediation · idrshield.com
+"""
+    return _send(email, subject, html, text)
