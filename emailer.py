@@ -428,121 +428,175 @@ def send_weekly_scan_alert(email: str, domain: str,
 
 def send_free_summary_email(email: str, receipt: dict) -> bool:
     """
-    Free visitor summary email — sent automatically after every public scan.
-    Shows score + top issues + upsell into $97 Defense Package.
-    Subject lines tested for open rate.
+    Free visitor summary email — critic-upgraded conversion copy.
+    Emotional arc: realization → consequence → certainty → CTA.
     """
-    scan       = receipt.get('scan', {})
-    domain     = scan.get('domain', 'your store')
-    score      = scan.get('overall_score', 0)
-    status     = scan.get('overall_status', 'fail').upper()
-    critical   = scan.get('critical_count', 0)
-    total      = scan.get('total_issues', 0)
-    cats       = scan.get('categories', [])
-    receipt_id = receipt.get('receipt_id', '')
+    scan         = receipt.get('scan', {})
+    domain       = scan.get('domain', 'your store')
+    score        = scan.get('overall_score', 0)
+    status       = scan.get('overall_status', 'fail').upper()
+    critical     = scan.get('critical_count', 0)
+    total        = scan.get('total_issues', 0)
+    cats         = scan.get('categories', [])
+    receipt_id   = receipt.get('receipt_id', '')
     registry_url = receipt.get('registry_url', f'https://idrshield.com/verify/{domain}')
+    gumroad_url  = 'https://idrshield.gumroad.com/l/oadcfq'
 
-    # Risk level copy
+    # Subject line — specific, personal, urgent
     if critical >= 5:
-        risk_line = f'<strong style="color:#e05555;">{critical} critical issues</strong> were detected — this is a high legal-risk profile.'
-        subject   = f'Your store flagged {critical} critical ADA issues — {domain}'
+        subject = f'Your store flagged {critical} critical ADA issues — {domain}'
     elif critical >= 1:
-        risk_line = f'<strong style="color:#e09060;">{critical} critical issue{"s" if critical != 1 else ""}</strong> detected. Elevated risk profile.'
-        subject   = f'Your IDR scan result for {domain}'
+        subject = f'Your store flagged {critical} critical ADA issue{"s" if critical != 1 else ""} — {domain}'
     elif total >= 1:
-        risk_line = f'No critical issues — but {total} total issue{"s" if total != 1 else ""} were found that should be addressed.'
-        subject   = f'Your store scan is ready — {domain}'
+        subject = f'Your IDR scan result — {domain}'
+    else:
+        subject = f'Your store passed — {domain}'
+
+    # Risk line — critic upgrade: trigger consequence, not just description
+    if critical >= 3:
+        risk_line = f'<strong style="color:#D94F4F;">{critical} critical issues detected</strong> — this is exactly the type of profile plaintiff scanners target first.'
+        risk_color = '#D94F4F'
+    elif critical >= 1:
+        risk_line = f'<strong style="color:#D97B2F;">{critical} critical issue{"s" if critical != 1 else ""} detected</strong> — elevated plaintiff risk profile.'
+        risk_color = '#D97B2F'
+    elif total >= 1:
+        risk_line = f'No critical issues — but {total} issue{"s" if total != 1 else ""} found that should be addressed before someone else runs this scan.'
+        risk_color = '#C9A84C'
     else:
         risk_line = 'No accessibility issues detected. Your store is clean.'
-        subject   = f'Your store passed — {domain}'
+        risk_color = '#27AE60'
 
-    # Status color
-    status_color = '#e05555' if status == 'FAIL' else ('#f0a500' if status == 'WARNING' else '#27AE60')
+    status_color = '#D94F4F' if status == 'FAIL' else ('#D97B2F' if status == 'WARNING' else '#27AE60')
 
     # Category rows
     cat_rows_html = ''
     for cat in cats[:5]:
         failed = cat.get('failed', 0)
         if failed == 0:
-            dot_color, count_str = '#27AE60', 'Clean'
+            dot_color, count_str, count_color = '#27AE60', 'Clean', '#27AE60'
         elif cat.get('score', 100) < 70:
-            dot_color, count_str = '#e05555', f'{failed} issue{"s" if failed != 1 else ""}'
+            dot_color, count_str, count_color = '#D94F4F', f'{failed} issue{"s" if failed != 1 else ""}', '#D94F4F'
         else:
-            dot_color, count_str = '#f0a500', f'{failed} issue{"s" if failed != 1 else ""}'
+            dot_color, count_str, count_color = '#D97B2F', f'{failed} issue{"s" if failed != 1 else ""}', '#D97B2F'
         cat_rows_html += f'''
         <tr>
-          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;font-size:14px;color:#333;">
-            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{dot_color};margin-right:10px;vertical-align:middle;"></span>
+          <td style="padding:11px 0;border-bottom:1px solid #f0f0f0;font-family:Arial,sans-serif;font-size:14px;color:#222;">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{dot_color};margin-right:10px;vertical-align:middle;flex-shrink:0;"></span>
             {cat.get('name', '')}
           </td>
-          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;text-align:right;font-family:Arial,sans-serif;font-size:13px;color:#666;">{count_str}</td>
+          <td style="padding:11px 0;border-bottom:1px solid #f0f0f0;text-align:right;font-family:Arial,sans-serif;font-size:13px;color:{count_color};font-weight:600;">{count_str}</td>
         </tr>'''
 
     html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font-family:Georgia,serif;background:#f5f5f5;margin:0;padding:40px 20px;">
-<div style="max-width:580px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">
+<body style="font-family:Georgia,serif;background:#f0ede6;margin:0;padding:40px 20px;">
+<div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #ddd;">
 
   <!-- Header -->
-  <div style="background:#080d1a;padding:32px 40px;border-bottom:3px solid #C9A84C;">
-    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 8px;">Institute of Digital Remediation</p>
-    <h1 style="font-size:22px;font-weight:normal;color:#F0E8D8;margin:0;">Your Store Scan Results</h1>
-    <p style="font-size:13px;color:rgba(240,232,216,0.45);margin:6px 0 0;font-family:Arial,sans-serif;">{domain}</p>
+  <div style="background:#07091A;padding:32px 40px;border-bottom:3px solid #C9A84C;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:rgba(201,168,76,0.65);margin:0 0 8px;">Institute of Digital Remediation</p>
+    <h1 style="font-family:Georgia,serif;font-size:24px;font-weight:normal;color:#F0E8D4;margin:0 0 4px;">Your Store Scan Results</h1>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:rgba(240,232,212,0.45);margin:0;">{domain}</p>
   </div>
 
-  <!-- Score block -->
-  <div style="background:#0d1526;padding:28px 40px;border-bottom:1px solid rgba(201,168,76,0.2);text-align:center;">
-    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 10px;">Overall Score</p>
-    <div style="font-size:60px;font-weight:bold;color:#F0E8D8;line-height:1;">{score}</div>
-    <div style="font-size:18px;color:rgba(240,232,216,0.35);margin-bottom:14px;">/ 100</div>
-    <span style="background:{status_color};color:#fff;font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.1em;padding:5px 20px;border-radius:20px;">{status}</span>
-    <p style="font-family:Arial,sans-serif;font-size:13px;color:rgba(240,232,216,0.5);margin:14px 0 0;">{risk_line}</p>
+  <!-- Score -->
+  <div style="background:#0C0F22;padding:32px 40px;border-bottom:1px solid rgba(201,168,76,0.2);text-align:center;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 12px;">Overall Score</p>
+    <div style="font-family:Georgia,serif;font-size:72px;font-weight:700;color:#F0E8D4;line-height:1;">{score}</div>
+    <div style="font-family:Georgia,serif;font-size:22px;color:rgba(240,232,212,0.3);margin-bottom:14px;">/ 100</div>
+    <span style="background:{status_color};color:#fff;font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;padding:5px 18px;border-radius:20px;">{status}</span>
+    <p style="font-family:Arial,sans-serif;font-size:14px;color:rgba(240,232,212,0.7);margin:16px 0 0;line-height:1.65;">{risk_line}</p>
   </div>
 
-  <!-- Category breakdown -->
-  <div style="padding:28px 40px;border-bottom:1px solid #e0e0e0;">
-    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 16px;">Issue Categories</p>
+  <!-- Issue breakdown -->
+  <div style="padding:28px 40px;border-bottom:1px solid #ebebeb;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#999;margin:0 0 16px;">Issue Breakdown</p>
     <table style="width:100%;border-collapse:collapse;">
       {cat_rows_html}
     </table>
   </div>
 
-  <!-- What's locked -->
-  <div style="padding:28px 40px;background:#fafaf8;border-bottom:1px solid #e0e0e0;">
-    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 14px;">This summary doesn't include</p>
-    <p style="font-family:Arial,sans-serif;font-size:13px;color:#666;line-height:1.8;margin:0;">
-      🔒 &nbsp;10-section legal-grade Defense Package PDF<br>
-      🔒 &nbsp;Before/after remediation code for every issue<br>
-      🔒 &nbsp;Plaintiff simulation layer &amp; legal positioning<br>
-      🔒 &nbsp;SHA-256 Scan Receipt — your immutable evidence record<br>
-      🔒 &nbsp;IDR Verified badge + weekly monitoring
+  <!-- Consequence block — critic: "what happens if you do nothing" -->
+  <div style="padding:28px 40px;background:#faf8f4;border-bottom:1px solid #ebebeb;">
+    <p style="font-family:Georgia,serif;font-size:16px;color:#1a1a1a;line-height:1.75;margin:0 0 14px;">
+      Most store owners only discover these issues after receiving a legal notice.
+    </p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#555;line-height:1.75;margin:0;">
+      At that point, the cost is no longer optional. Typical settlement ranges in comparable cases run <strong>$25,000–$95,000</strong> — resolved quietly, quickly, without warning.
     </p>
   </div>
 
-  <!-- Upsell CTA -->
-  <div style="padding:32px 40px;text-align:center;border-bottom:1px solid #e0e0e0;">
-    <p style="font-family:Georgia,serif;font-size:16px;color:#333;line-height:1.7;margin:0 0 20px;">
-      The full Defense Package gives you the documentation, remediation guidance, and legal positioning to defend your store.
+  <!-- Locked teaser -->
+  <div style="padding:28px 40px;border-bottom:1px solid #ebebeb;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#999;margin:0 0 14px;">What you're seeing here is only the surface</p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#444;line-height:1.9;margin:0;">
+      🔒 &nbsp;Full 10-section Defense Package PDF<br>
+      🔒 &nbsp;Step-by-step remediation code for every issue<br>
+      🔒 &nbsp;Plaintiff simulation — exactly how a law firm scores your store<br>
+      🔒 &nbsp;Legal positioning documentation<br>
+      🔒 &nbsp;SHA-256 tamper-proof Scan Receipt — your immutable evidence record<br>
+      🔒 &nbsp;IDR Verified badge + weekly automated monitoring
     </p>
-    <a href="https://gum.co/idrshield" style="display:inline-block;background:#C9A84C;color:#080d1a;font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;padding:16px 36px;text-decoration:none;border-radius:3px;">
-      Unlock Full Defense Package — $97
+  </div>
+
+  <!-- Book section -->
+  <div style="padding:28px 40px;background:#07091A;border-bottom:1px solid rgba(201,168,76,0.2);">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 10px;">Included with Founding Membership</p>
+    <p style="font-family:Georgia,serif;font-size:17px;font-weight:normal;color:#F0E8D4;margin:0 0 6px;">The 2026 Accessibility Shield</p>
+    <p style="font-family:Arial,sans-serif;font-size:12px;color:rgba(240,232,212,0.5);margin:0 0 16px;font-style:italic;">ADA Website Lawsuit Defense for Online Store Owners</p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:rgba(240,232,212,0.65);line-height:1.8;margin:0;">
+      &#x2022; &nbsp;How plaintiff firms scan and identify targets — and how to not be one<br>
+      &#x2022; &nbsp;The exact documentation that gives you a defensible compliance posture<br>
+      &#x2022; &nbsp;How to become a hard target before a demand letter arrives
+    </p>
+  </div>
+
+  <!-- Founding member benefits -->
+  <div style="padding:28px 40px;background:#faf8f4;border-bottom:1px solid #ebebeb;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#C9A84C;margin:0 0 16px;">Founding Member Benefits</p>
+    <table style="width:100%;border-collapse:collapse;">
+      <tr><td style="padding:8px 0;border-bottom:1px solid #ebebeb;font-family:Arial,sans-serif;font-size:13px;color:#333;">&#x2713; &nbsp;The 2026 Accessibility Shield — full digital book</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #ebebeb;font-family:Arial,sans-serif;font-size:13px;color:#333;">&#x2713; &nbsp;10-section legal-grade Defense Package PDF</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #ebebeb;font-family:Arial,sans-serif;font-size:13px;color:#333;">&#x2713; &nbsp;SHA-256 Scan Receipt — cryptographic compliance proof</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #ebebeb;font-family:Arial,sans-serif;font-size:13px;color:#333;">&#x2713; &nbsp;IDR Registry entry — publicly verifiable</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #ebebeb;font-family:Arial,sans-serif;font-size:13px;color:#333;">&#x2713; &nbsp;IDR Verified badge for your store footer</td></tr>
+      <tr><td style="padding:8px 0;border-bottom:1px solid #ebebeb;font-family:Arial,sans-serif;font-size:13px;color:#333;">&#x2713; &nbsp;Weekly automated rescans + immediate violation alerts</td></tr>
+      <tr><td style="padding:8px 0;font-family:Arial,sans-serif;font-size:13px;color:#C9A84C;font-weight:700;">&#x2713; &nbsp;$29/month — locked permanently for founding members</td></tr>
+    </table>
+  </div>
+
+  <!-- Closer — critic: "this is happening whether you act or not" -->
+  <div style="padding:28px 40px;border-bottom:1px solid #ebebeb;text-align:center;">
+    <p style="font-family:Georgia,serif;font-size:16px;color:#1a1a1a;line-height:1.75;margin:0 0 8px;">
+      The Defense Package doesn't just show you the issues —
+    </p>
+    <p style="font-family:Georgia,serif;font-size:16px;color:#1a1a1a;line-height:1.75;margin:0 0 20px;">
+      it gives you the exact documentation, proof, and positioning to protect your store if it's ever challenged.
+    </p>
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#777;font-style:italic;margin:0 0 24px;line-height:1.7;">
+      Your store can be scanned at any time — by anyone.<br>
+      The only question is whether you see the results first&hellip; or they do.
+    </p>
+    <a href="{gumroad_url}" style="display:inline-block;background:#C9A84C;color:#07091A;font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;padding:16px 40px;text-decoration:none;border-radius:3px;">
+      Activate Founding Membership &mdash; $97
     </a>
-    <p style="font-family:Arial,sans-serif;font-size:11px;color:#999;margin:12px 0 0;">Founding price &nbsp;·&nbsp; 30 days free &nbsp;·&nbsp; $29/month thereafter</p>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#aaa;margin:12px 0 0;">Limited to the first 500 stores &nbsp;&#xB7;&nbsp; 30 days free &nbsp;&#xB7;&nbsp; $29/month locked forever</p>
   </div>
 
-  <!-- Registry link -->
-  <div style="padding:20px 40px;border-bottom:1px solid #e0e0e0;">
-    <p style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 6px;">Your Registry Record</p>
-    <a href="{registry_url}" style="color:#C9A84C;font-size:13px;">{registry_url}</a>
-    <p style="font-family:Arial,sans-serif;font-size:11px;color:#bbb;margin:6px 0 0;">Publicly verifiable. Anyone can confirm your compliance record.</p>
+  <!-- Registry -->
+  <div style="padding:20px 40px;border-bottom:1px solid #ebebeb;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#999;margin:0 0 6px;">Your Public Registry Record</p>
+    <a href="{registry_url}" style="color:#C9A84C;font-family:Arial,sans-serif;font-size:13px;text-decoration:none;">{registry_url}</a>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#bbb;margin:5px 0 0;">Publicly verifiable. Anyone can confirm your compliance record.</p>
   </div>
 
   <!-- Footer -->
-  <div style="padding:20px 40px;background:#080d1a;">
-    <p style="font-family:Arial,sans-serif;font-size:11px;color:rgba(240,232,216,0.3);margin:0;line-height:1.6;">
-      Scan Receipt: {receipt_id[:16]}…&nbsp;·&nbsp; Institute of Digital Remediation&nbsp;·&nbsp; idrshield.com<br>
-      Not a law firm. This is a compliance documentation system.
+  <div style="padding:20px 40px;background:#07091A;">
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:rgba(240,232,212,0.3);margin:0;line-height:1.7;">
+      Scan Receipt: {receipt_id[:16] if receipt_id else 'N/A'}&hellip; &nbsp;&#xB7;&nbsp; Institute of Digital Remediation &nbsp;&#xB7;&nbsp; idrshield.com<br>
+      Not a law firm. This is a compliance documentation system.<br>
+      Settlement ranges cited reflect publicly available case data and are not a prediction of any specific legal action.
     </p>
   </div>
 
@@ -553,19 +607,53 @@ def send_free_summary_email(email: str, receipt: dict) -> bool:
     text = f"""IDR SCAN RESULTS — {domain}
 
 Score: {score}/100 — {status}
-Critical Issues: {critical}
-Total Issues: {total}
+Critical Issues: {critical} | Total Issues: {total}
 
-This is a summary only. Your full Defense Package — including remediation guidance, legal positioning, and SHA-256 receipt — is available at:
+{critical} critical issues detected — this is exactly the type of profile plaintiff scanners target first.
 
-https://gum.co/idrshield
+---
 
-Founding price — $97 | 30 days free | $29/month thereafter
+ISSUE BREAKDOWN:
+{chr(10).join([f"  {c.get('name','')}: {'Clean' if c.get('failed',0)==0 else str(c.get('failed',0))+' issue(s)'}" for c in cats[:5]])}
 
-Registry record: {registry_url}
+---
 
-Institute of Digital Remediation
-hello@idrshield.com | idrshield.com
+Most store owners only discover these issues after receiving a legal notice.
+At that point, the cost is no longer optional.
+
+---
+
+INCLUDED WITH FOUNDING MEMBERSHIP:
+
+The 2026 Accessibility Shield (book)
+- How plaintiff firms identify targets — and how to not be one
+- The exact documentation that gives you a defensible compliance posture
+- How to become a hard target before a demand letter arrives
+
++ 10-section Defense Package PDF
++ SHA-256 Scan Receipt
++ IDR Registry entry
++ IDR Verified badge
++ Weekly rescans + violation alerts
++ $29/month — locked permanently
+
+---
+
+Your store can be scanned at any time — by anyone.
+The only question is whether you see the results first... or they do.
+
+Activate Founding Membership — $97
+Limited to the first 500 stores · 30 days free · $29/month locked forever
+
+{gumroad_url}
+
+---
+
+Your Registry Record: {registry_url}
+Scan Receipt: {receipt_id[:16] if receipt_id else 'N/A'}
+
+Institute of Digital Remediation · idrshield.com
+Not a law firm. This is a compliance documentation system.
 """
 
     return _send(email, subject, html, text)
