@@ -14,6 +14,7 @@ from scanner.engine import scan_url
 from receipt.generator import generate_receipt, verify_receipt, format_receipt_summary
 from receipt.pdf_generator import generate_pdf
 from database import (
+    queue_sequence, cancel_all_sequences, init_email_queue,
     init_db, save_receipt, get_receipt, get_receipts_by_domain,
     upsert_registry, get_registry, log_evidence, get_evidence_log,
     log_scan_alert,
@@ -35,6 +36,7 @@ RECEIPT_STORE = {}
 
 # Initialize database on startup
 db_available = init_db()
+init_email_queue()
 start_cron_scheduler()
 
 
@@ -106,6 +108,19 @@ def scan():
 
         receipt = generate_receipt(result)
         _save(receipt)
+
+        # Queue free scanner nurture sequence if email provided
+        email = body.get('email', '').strip()
+        if email and '@' in email and db_available:
+            from cron import FREE_SCANNER_STEPS
+            queue_sequence(
+                email    = email,
+                domain   = domain,
+                sequence = 'free_scanner',
+                receipt  = receipt,
+                steps    = FREE_SCANNER_STEPS
+            )
+            print(f"[SCAN] Nurture sequence queued for {email}")
 
         return jsonify(receipt), 200
 
@@ -572,11 +587,19 @@ def gumroad_webhook():
 
         send_activation_receipt(email, receipt)
 
-        try:
-            on_purchase(email=email, domain=domain, plan=plan,
-                        receipt_id=receipt['receipt_id'])
-        except Exception as ke:
-            print(f"[WEBHOOK] Kit tagging failed (non-fatal): {ke}")
+        # Cancel any free scanner nurture emails still pending
+        if db_available:
+            cancel_all_sequences(email)
+            # Queue founder onboarding sequence
+            from cron import FOUNDER_STEPS
+            queue_sequence(
+                email    = email,
+                domain   = domain,
+                sequence = 'founder',
+                receipt  = receipt,
+                steps    = FOUNDER_STEPS
+            )
+            print(f"[WEBHOOK] Founder sequence queued for {email}")
 
         print(f"[WEBHOOK] Activated: {domain} | {email} | {receipt['receipt_id']}")
 
