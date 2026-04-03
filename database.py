@@ -437,3 +437,181 @@ def log_scan_alert(domain: str, scanner_ip: str = None, scan_type: str = 'extern
         return False
     finally:
         conn.close()
+
+
+# ── Email Queue ───────────────────────────────────────────────────────────────
+
+EMAIL_QUEUE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS email_queue (
+    id              SERIAL PRIMARY KEY,
+    email           TEXT NOT NULL,
+    domain          TEXT NOT NULL,
+    sequence        TEXT NOT NULL,
+    step            INTEGER NOT NULL,
+    send_after      TIMESTAMPTZ NOT NULL,
+    sent            BOOLEAN NOT NULL DEFAULT FALSE,
+    sent_at         TIMESTAMPTZ,
+    cancelled       BOOLEAN NOT NULL DEFAULT FALSE,
+    receipt_json    JSONB,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_queue_pending
+    ON email_queue(send_after)
+    WHERE sent = FALSE AND cancelled = FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_email_queue_email
+    ON email_queue(email);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_email_queue_unique
+    ON email_queue(email, sequence, step)
+    WHERE sent = FALSE AND cancelled = FALSE;
+"""
+
+
+def init_email_queue():
+    """Create email_queue table if it doesn't exist."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(EMAIL_QUEUE_SCHEMA)
+        print("Email queue schema initialized")
+        return True
+    except Exception as e:
+        print(f"Email queue init error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def queue_sequence(email: str, domain: str, sequence: str,
+                   receipt: dict = None, steps: list = None) -> bool:
+    """
+    Insert all steps of a sequence into the email queue.
+    steps = list of (step_number, delay_hours) tuples.
+    Uses INSERT ... ON CONFLICT DO NOTHING to prevent duplicates.
+    """
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        import json
+        receipt_json = json.dumps(receipt) if receipt else None
+        now = datetime.now(timezone.utc)
+        with conn.cursor() as cur:
+            for step_num, delay_hours in steps:
+                send_after = now + timedelta(hours=delay_hours)
+                cur.execute("""
+                    INSERT INTO email_queue
+                        (email, domain, sequence, step, send_after, receipt_json)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (email, sequence, step)
+                    WHERE sent = FALSE AND cancelled = FALSE
+                    DO NOTHING
+                """, (email, domain, sequence, step_num, send_after, receipt_json))
+        print(f"[QUEUE] Queued {len(steps)} steps of '{sequence}' for {email}")
+        return True
+    except Exception as e:
+        print(f"queue_sequence error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_due_emails() -> list:
+    """
+    Return all unsent, uncancelled emails whose send_after has passed.
+    Called by cron every hour.
+    """
+    conn = get_conn()
+    if not conn:
+        return []
+    try:
+        import psycopg2.extras
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, email, domain, sequence, step, receipt_json
+                FROM email_queue
+                WHERE sent = FALSE
+                  AND cancelled = FALSE
+                  AND send_after <= NOW()
+                ORDER BY send_after ASC
+                LIMIT 100
+            """)
+            return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        print(f"get_due_emails error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def mark_email_sent(queue_id: int) -> bool:
+    """Mark a queued email as sent."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE email_queue
+                SET sent = TRUE, sent_at = NOW()
+                WHERE id = %s
+            """, (queue_id,))
+        return True
+    except Exception as e:
+        print(f"mark_email_sent error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def cancel_sequence(email: str, sequence: str) -> bool:
+    """
+    Cancel all unsent emails in a sequence for an email address.
+    Used when a free scanner purchases — cancels their nurture sequence.
+    """
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE email_queue
+                SET cancelled = TRUE
+                WHERE email = %s
+                  AND sequence = %s
+                  AND sent = FALSE
+            """, (email, sequence))
+            cancelled = cur.rowcount
+        print(f"[QUEUE] Cancelled {cancelled} pending '{sequence}' emails for {email}")
+        return True
+    except Exception as e:
+        print(f"cancel_sequence error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def cancel_all_sequences(email: str) -> bool:
+    """Cancel ALL unsent emails for an email address. Used on purchase."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE email_queue
+                SET cancelled = TRUE
+                WHERE email = %s AND sent = FALSE
+            """, (email,))
+            cancelled = cur.rowcount
+        print(f"[QUEUE] Cancelled {cancelled} pending emails for {email}")
+        return True
+    except Exception as e:
+        print(f"cancel_all_sequences error: {e}")
+        return False
+    finally:
+        conn.close()
