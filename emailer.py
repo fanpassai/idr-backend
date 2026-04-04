@@ -1368,49 +1368,100 @@ def send_weekly_rescan_issues(email: str, domain: str,
                               new_issues: list, receipt_id: str) -> bool:
     """
     C1 — Weekly rescan found new issues.
-    Replaces existing send_weekly_scan_alert.
+    Enhanced: plain English violations, three fix paths, direct fix page link.
     """
     count        = len(new_issues)
-    subject      = f'New issues detected on your store — {domain}'
+    subject      = f'New issues detected on {domain} — action needed'
     registry_url = f'{REGISTRY_BASE}/{domain}'
+    fix_url      = f'https://idrshield.com/fix/{domain}?email={{}}&receipt={receipt_id}'
 
-    html = _email_header(f'New issues detected on {domain}', f'{count} new issue{"s" if count != 1 else ""} found in your latest rescan')
+    # Plain English violation names
+    violation_names = {
+        'alt_text':          ('Product images are invisible to screen readers',   'Critical'),
+        'form_labels':       ('Form fields cannot be identified by screen readers','Critical'),
+        'keyboard_nav':      ('Keyboard users cannot navigate efficiently',        'Serious'),
+        'heading_structure': ('Page headings are out of order or missing',         'Moderate'),
+        'aria_links':        ('Buttons and links have no description',             'Critical'),
+        'contrast':          ('Text is hard to read due to low color contrast',    'Moderate'),
+    }
+
+    # Build issue rows
+    issue_rows_html = ''
+    for issue in new_issues[:6]:
+        slug = issue.get('slug', issue.get('category', ''))
+        name, sev = violation_names.get(slug, (slug.replace('_',' ').title(), 'Serious'))
+        sev_color = '#D94F4F' if sev == 'Critical' else ('#D97B2F' if sev == 'Serious' else '#C9A84C')
+        issue_rows_html += f'''
+        <tr>
+          <td style="padding:14px 0;border-bottom:1px solid #ebebeb;vertical-align:top;">
+            <span style="display:inline-block;font-family:Arial,sans-serif;font-size:8px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:{sev_color};background:rgba(0,0,0,0.04);border:1px solid {sev_color}33;border-radius:10px;padding:2px 8px;margin-bottom:6px;">{sev}</span><br>
+            <strong style="font-family:Arial,sans-serif;font-size:14px;color:#1a1a1a;">{name}</strong>
+          </td>
+        </tr>'''
+
+    html  = _email_header(f'Your store needs attention — {domain}',
+                          f'{count} issue{"s" if count != 1 else ""} detected in your latest scan')
     html += _body_section(
-        _p('Your latest IDR rescan just completed.') +
-        _pull_quote(f'{count} new issue{"s were" if count != 1 else " was"} detected on your store.') +
-        _p('This doesn\'t mean something went wrong. It means your store changed — and the system caught it.') +
-        _p('<strong>That\'s exactly why IDR Shield exists.</strong>', color='#1a1a1a') +
-        _p('Without monitoring, these changes happen silently. With monitoring, you see them immediately.', color='#555')
+        _p('Your latest IDR Shield rescan just completed.') +
+        _pull_quote(f'{count} issue{"s were" if count != 1 else " was"} detected on your store.') +
+        _p('This doesn\'t mean something went wrong. It means your store changed — and the system caught it before anyone else did.') +
+        _p('<strong>The faster you act, the stronger your compliance record stays.</strong>', color='#1a1a1a')
     )
     html += _body_section(
-        '<p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#C9A84C;margin:0 0 14px;">What to do next</p>' +
-        '<p style="font-family:Arial,sans-serif;font-size:14px;color:#333;line-height:1.9;margin:0 0 20px;">' +
-        '1. &nbsp;Review your updated report<br>' +
-        '2. &nbsp;Apply the recommended fixes<br>' +
-        '3. &nbsp;Submit for a confirmation scan</p>' +
-        _p('The faster you act, the stronger your record stays.') +
-        _pull_quote('Your store is not static. Your protection shouldn\'t be either.') +
+        '<p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#C9A84C;margin:0 0 14px;">Issues Found</p>' +
+        f'<table style="width:100%;border-collapse:collapse;">{issue_rows_html}</table>',
+        '#faf8f4'
+    )
+    html += _body_section(
+        '<p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#C9A84C;margin:0 0 14px;">How to fix these</p>' +
+        '<table style="width:100%;border-collapse:collapse;">' +
+        '<tr><td style="padding:10px 0;border-bottom:1px solid #ebebeb;">' +
+        '<p style="font-family:Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 4px;font-weight:600;">&#x1F6CD; Fix it yourself</p>' +
+        '<p style="font-family:Arial,sans-serif;font-size:13px;color:#555;margin:0;">Step-by-step Shopify guide for each issue — no code needed for most.</p>' +
+        '</td></tr>' +
+        '<tr><td style="padding:10px 0;border-bottom:1px solid #ebebeb;">' +
+        '<p style="font-family:Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 4px;font-weight:600;">&#x1F4E7; Send to your developer</p>' +
+        '<p style="font-family:Arial,sans-serif;font-size:13px;color:#555;margin:0;">Pre-written emails with the fix details ready to forward — one click.</p>' +
+        '</td></tr>' +
+        '<tr><td style="padding:10px 0;">' +
+        '<p style="font-family:Arial,sans-serif;font-size:14px;color:#1a1a1a;margin:0 0 4px;font-weight:600;">&#x1F4BB; See the code fix</p>' +
+        '<p style="font-family:Arial,sans-serif;font-size:13px;color:#555;margin:0;">Before/after code for each issue if you prefer the technical approach.</p>' +
+        '</td></tr>' +
+        '</table>' +
+        '<p style="font-family:Arial,sans-serif;font-size:12px;color:#aaa;margin:14px 0 0;">&#x1F6A7; &nbsp;IDR Approved Developers coming soon — vetted specialists who fix and verify automatically.</p>'
+    )
+    html += _body_section(
+        _pull_quote('Your store can be scanned at any time — by anyone. The only question is whether you see the results first&hellip; or they do.') +
         '<div style="text-align:center;padding:8px 0;">' +
-        _cta_button('View Updated Report', registry_url) +
+        _cta_button('View &amp; Fix My Issues &#x2192;', f'https://idrshield.com/fix/{domain}') +
+        '<p style="font-family:Arial,sans-serif;font-size:11px;color:#aaa;margin:12px 0 0;">Opens your personal fix portal — step-by-step guides for each issue</p>' +
         '</div>',
         '#faf8f4'
     )
     html += _email_footer(receipt_id)
 
-    text = f"""New issues detected on your store — {domain}
+    issues_text = '\n'.join([
+        f'  • {violation_names.get(i.get("slug", i.get("category","")), (i.get("slug",""), ""))[0]}'
+        for i in new_issues[:6]
+    ])
 
-Your latest IDR rescan found {count} new issue{"s" if count != 1 else ""}.
+    text = f"""Your store needs attention — {domain}
 
-This doesn't mean something went wrong. It means your store changed — and the system caught it.
+{count} issue{"s" if count != 1 else ""} detected in your latest IDR scan.
 
-What to do next:
-1. Review your updated report
-2. Apply the recommended fixes
-3. Submit for a confirmation scan
+Issues found:
+{issues_text}
 
-The faster you act, the stronger your record stays.
+How to fix these — three options on your fix page:
+1. Fix it yourself — step-by-step Shopify guide, no code needed for most
+2. Send to your developer — pre-written email ready to forward
+3. See the code fix — technical before/after for developers
 
-View Updated Report: {registry_url}
+Your store can be scanned at any time — by anyone.
+The only question is whether you see the results first... or they do.
+
+View & Fix My Issues:
+https://idrshield.com/fix/{domain}
 
 Institute of Digital Remediation · idrshield.com
 """
@@ -1765,6 +1816,65 @@ If you want to restore monitoring, your founding rate is still available.
 If not, we'll leave you here.
 
 Reactivate IDR Shield: {GUMROAD}
+
+Institute of Digital Remediation · idrshield.com
+"""
+    return _send(email, subject, html, text)
+
+
+# ── 48-hour nudge ─────────────────────────────────────────────────────────────
+
+def send_fix_nudge(email: str, domain: str, hours: int,
+                   receipt_id: str = '', issues_remaining: int = 0) -> bool:
+    """
+    Fired 48h, 96h, 144h after weekly rescan if no fix submitted.
+    Escalates slightly each time.
+    hours: 48, 96, or 144
+    """
+    fix_url = f'https://idrshield.com/fix/{domain}'
+
+    if hours == 48:
+        subject   = f'Still open — your store has unresolved issues'
+        headline  = 'Your issues are still open.'
+        body_copy = 'It\'s been 48 hours since we detected issues on your store. They\'re still unresolved.'
+        cta_copy  = 'Start with the Shopify guide — most of these can be fixed without a developer.'
+        escalation = ''
+    elif hours == 96:
+        subject   = f'4 days open — here\'s the developer path'
+        headline  = 'Still there — here\'s the easiest path forward.'
+        body_copy = 'Your store has had open accessibility issues for 4 days. If you\'re not sure how to fix them yourself, your developer can handle this in under an hour.'
+        cta_copy  = 'Your fix page has a pre-written email ready to forward to your developer — one click.'
+        escalation = _pull_quote('The faster these are resolved, the stronger your compliance record. Every day without action is a day your store is more exposed than it needs to be.')
+    else:
+        subject   = f'6 days — this is the most cited violation in ADA claims'
+        headline  = 'This needs to be resolved.'
+        body_copy = f'Your store has had open accessibility issues for 6 days. Issues like these are cited in the majority of ADA demand letters targeting e-commerce stores.'
+        cta_copy  = 'Your fix page has everything your developer needs — pre-written issue description, before/after code, and the exact elements affected. Forward it today.'
+        escalation = _pull_quote('Your store can be scanned at any time — by anyone. The only question is whether you see the results first… or they do.')
+
+    html  = _email_header(headline, domain)
+    html += _body_section(
+        _p(body_copy) +
+        (escalation if escalation else '') +
+        _p(cta_copy, color='#555')
+    )
+    html += _body_section(
+        '<div style="text-align:center;padding:8px 0;">' +
+        _cta_button('Fix My Issues Now &#x2192;', fix_url) +
+        '<p style="font-family:Arial,sans-serif;font-size:11px;color:#aaa;margin:12px 0 0;">Step-by-step guides &nbsp;·&nbsp; Developer email template &nbsp;·&nbsp; Code fixes</p>' +
+        '</div>',
+        '#faf8f4'
+    )
+    html += _email_footer(receipt_id)
+
+    text = f"""{headline} — {domain}
+
+{body_copy}
+
+{cta_copy}
+
+Fix My Issues:
+{fix_url}
 
 Institute of Digital Remediation · idrshield.com
 """
