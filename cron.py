@@ -53,6 +53,15 @@ WIN_BACK_STEPS = [
 ]
 
 
+# Nudge steps after weekly rescan finds issues
+# These fire if no fix-report submitted within 48h of rescan
+RESCAN_NUDGE_STEPS = [
+    (1, 48),   # 48 hours — gentle nudge
+    (2, 96),   # 96 hours — developer path emphasis
+    (3, 144),  # 144 hours — escalation, cite legal risk
+]
+
+
 # ── Email dispatcher ──────────────────────────────────────────────────────────
 
 def dispatch_email(row: dict) -> bool:
@@ -120,6 +129,14 @@ def dispatch_email(row: dict) -> bool:
             fn = dispatch.get(step)
             if fn:
                 return fn(email, domain)
+
+        elif sequence == 'rescan_nudge':
+            from emailer import send_fix_nudge
+            hours_map = { 1: 48, 2: 96, 3: 144 }
+            hours = hours_map.get(step, 48)
+            return send_fix_nudge(email, domain, hours,
+                                  receipt_id=row.get('receipt_json', {}) and
+                                  json.loads(row['receipt_json']).get('receipt_id','') if row.get('receipt_json') else '')
 
         print(f"[QUEUE] No handler for {sequence} step {step}")
         return False
@@ -222,6 +239,15 @@ def rescan_domain(domain: str, email: str = None):
             if new_issues:
                 send_weekly_scan_alert(email, domain, new_issues, receipt['receipt_id'])
                 print(f"[CRON] Alert sent to {email} for {domain}")
+                # Queue 48h nudge sequence
+                from database import queue_sequence
+                queue_sequence(
+                    email    = email,
+                    domain   = domain,
+                    sequence = 'rescan_nudge',
+                    receipt  = receipt,
+                    steps    = RESCAN_NUDGE_STEPS
+                )
 
         print(f"[CRON] Rescan complete: {domain} → {result.overall_score}/100")
         return True
