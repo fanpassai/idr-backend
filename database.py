@@ -615,3 +615,364 @@ def cancel_all_sequences(email: str) -> bool:
         return False
     finally:
         conn.close()
+
+
+# ── Member Auth ───────────────────────────────────────────────────────────────
+
+AUTH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS member_sessions (
+    id              SERIAL PRIMARY KEY,
+    email           TEXT NOT NULL,
+    token_hash      TEXT NOT NULL UNIQUE,
+    token_type      TEXT NOT NULL DEFAULT 'magic_link',
+    expires_at      TIMESTAMPTZ NOT NULL,
+    used            BOOLEAN NOT NULL DEFAULT FALSE,
+    used_at         TIMESTAMPTZ,
+    created_ip      TEXT,
+    used_ip         TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_token_hash
+    ON member_sessions(token_hash);
+CREATE INDEX IF NOT EXISTS idx_sessions_email
+    ON member_sessions(email);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires
+    ON member_sessions(expires_at)
+    WHERE used = FALSE;
+"""
+
+
+def init_auth_schema():
+    """Create member_sessions table if it doesn't exist."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(AUTH_SCHEMA)
+        print("Auth schema initialized")
+        return True
+    except Exception as e:
+        print(f"Auth schema init error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def create_magic_token(email: str, token_hash: str, expires_at, ip: str = None) -> bool:
+    """Store a new magic link token (hashed)."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            # Invalidate any existing unused magic links for this email
+            cur.execute("""
+                UPDATE member_sessions
+                SET used = TRUE
+                WHERE email = %s
+                  AND token_type = 'magic_link'
+                  AND used = FALSE
+            """, (email,))
+            # Insert new token
+            cur.execute("""
+                INSERT INTO member_sessions
+                    (email, token_hash, token_type, expires_at, created_ip)
+                VALUES (%s, %s, 'magic_link', %s, %s)
+            """, (email, token_hash, expires_at, ip))
+        return True
+    except Exception as e:
+        print(f"create_magic_token error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def consume_magic_token(token_hash: str, ip: str = None):
+    """
+    Validate and consume a magic link token.
+    Returns email string if valid, None if not found/expired/used.
+    """
+    conn = get_conn()
+    if not conn:
+        return None
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, email, expires_at, used
+                FROM member_sessions
+                WHERE token_hash = %s
+                  AND token_type = 'magic_link'
+            """, (token_hash,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            if row['used']:
+                return None
+            if row['expires_at'] < datetime.now(timezone.utc):
+                return None
+            # Mark as used
+            cur.execute("""
+                UPDATE member_sessions
+                SET used = TRUE, used_at = NOW(), used_ip = %s
+                WHERE id = %s
+            """, (ip, row['id']))
+        return row['email']
+    except Exception as e:
+        print(f"consume_magic_token error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def create_session_token(email: str, token_hash: str, expires_at, ip: str = None) -> bool:
+    """Store a 30-day session token (hashed)."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO member_sessions
+                    (email, token_hash, token_type, expires_at, created_ip)
+                VALUES (%s, %s, 'session', %s, %s)
+            """, (email, token_hash, expires_at, ip))
+        return True
+    except Exception as e:
+        print(f"create_session_token error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def validate_session_token(token_hash: str) -> str:
+    """
+    Validate a session token.
+    Returns email if valid and not expired, None otherwise.
+    """
+    conn = get_conn()
+    if not conn:
+        return None
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT email, expires_at, used
+                FROM member_sessions
+                WHERE token_hash = %s
+                  AND token_type = 'session'
+            """, (token_hash,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            if row['used']:
+                return None
+            if row['expires_at'] < datetime.now(timezone.utc):
+                return None
+            return row['email']
+    except Exception as e:
+        print(f"validate_session_token error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def revoke_session_token(token_hash: str) -> bool:
+    """Mark a session token as used (logout)."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE member_sessions
+                SET used = TRUE, used_at = NOW()
+                WHERE token_hash = %s AND token_type = 'session'
+            """, (token_hash,))
+        return True
+    except Exception as e:
+        print(f"revoke_session_token error: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def purge_expired_tokens() -> int:
+    """
+    Delete tokens expired more than 24h ago. Called by cron to keep table lean.
+    Returns count of deleted rows.
+    """
+    conn = get_conn()
+    if not conn:
+        return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM member_sessions
+                WHERE expires_at < NOW() - INTERVAL '24 hours'
+            """)
+            return cur.rowcount
+    except Exception as e:
+        print(f"purge_expired_tokens error: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
+# ── Member portal queries ─────────────────────────────────────────────────────
+
+def get_member_dashboard(email: str) -> dict:
+    """
+    Full dashboard data for a member identified by email.
+    Returns registry record + scan history summary.
+    """
+    conn = get_conn()
+    if not conn:
+        return None
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Registry record
+            cur.execute("""
+                SELECT domain, registry_id, status, latest_score,
+                       critical_count, scan_count, last_scanned,
+                       badge_active, activated_by, created_at
+                FROM registry
+                WHERE activated_by = %s
+                ORDER BY created_at ASC
+            """, (email,))
+            domains = [dict(r) for r in cur.fetchall()]
+
+            if not domains:
+                return None
+
+            # Scan history for all their domains (last 20 scans each)
+            result = []
+            for d in domains:
+                cur.execute("""
+                    SELECT receipt_id, overall_score, overall_status,
+                           critical_count, total_issues, timestamp_utc
+                    FROM receipts
+                    WHERE domain = %s
+                    ORDER BY timestamp_utc DESC
+                    LIMIT 20
+                """, (d['domain'],))
+                scans = []
+                for row in cur.fetchall():
+                    scans.append({
+                        'receipt_id':    row['receipt_id'],
+                        'score':         row['overall_score'],
+                        'status':        row['overall_status'],
+                        'critical_count': row['critical_count'],
+                        'total_issues':  row['total_issues'],
+                        'scanned_at':    row['timestamp_utc'].isoformat() if row['timestamp_utc'] else None,
+                    })
+                d_out = dict(d)
+                d_out['last_scanned'] = d['last_scanned'].isoformat() if d.get('last_scanned') else None
+                d_out['created_at']   = d['created_at'].isoformat()   if d.get('created_at')   else None
+                d_out['scan_history'] = scans
+                result.append(d_out)
+
+            return result
+
+    except Exception as e:
+        print(f"get_member_dashboard error: {e}")
+        return None
+    finally:
+        conn.close()
+
+
+def get_member_evidence(email: str, domain: str) -> list:
+    """Evidence log for a domain, verified to belong to this email."""
+    conn = get_conn()
+    if not conn:
+        return []
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Verify ownership
+            cur.execute("""
+                SELECT domain FROM registry
+                WHERE domain = %s AND activated_by = %s
+            """, (domain.replace('www.', ''), email))
+            if not cur.fetchone():
+                return None  # None = unauthorized vs [] = empty
+
+            cur.execute("""
+                SELECT event_type, event_detail, timestamp_utc, receipt_id
+                FROM evidence_log
+                WHERE domain = %s
+                ORDER BY timestamp_utc ASC
+            """, (domain.replace('www.', ''),))
+            return [{
+                'event_type':   r['event_type'],
+                'detail':       r['event_detail'],
+                'timestamp':    r['timestamp_utc'].isoformat() if r['timestamp_utc'] else None,
+                'receipt_id':   r['receipt_id'],
+            } for r in cur.fetchall()]
+    except Exception as e:
+        print(f"get_member_evidence error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_member_fixes(email: str, domain: str) -> list:
+    """Fix requests for a domain, verified to belong to this email."""
+    conn = get_conn()
+    if not conn:
+        return []
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT domain FROM registry
+                WHERE domain = %s AND activated_by = %s
+            """, (domain.replace('www.', ''), email))
+            if not cur.fetchone():
+                return None
+
+            cur.execute("""
+                SELECT id, issue_category, issue_count, status,
+                       confirmation_receipt_id, confirmed_at,
+                       notes, created_at
+                FROM fix_requests
+                WHERE domain = %s
+                ORDER BY created_at DESC
+            """, (domain.replace('www.', ''),))
+            return [{
+                'id':              r['id'],
+                'category':        r['issue_category'],
+                'original_count':  r['issue_count'],
+                'status':          r['status'],
+                'confirmation_id': r['confirmation_receipt_id'],
+                'confirmed_at':    r['confirmed_at'].isoformat() if r.get('confirmed_at') else None,
+                'notes':           r['notes'],
+                'reported_at':     r['created_at'].isoformat() if r.get('created_at') else None,
+            } for r in cur.fetchall()]
+    except Exception as e:
+        print(f"get_member_fixes error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def get_latest_receipt_id(email: str, domain: str):
+    """Get the most recent receipt_id for a domain owned by this email."""
+    conn = get_conn()
+    if not conn:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT r.receipt_id
+                FROM receipts r
+                JOIN registry reg ON reg.domain = r.domain
+                WHERE r.domain = %s AND reg.activated_by = %s
+                ORDER BY r.timestamp_utc DESC
+                LIMIT 1
+            """, (domain.replace('www.', ''), email))
+            row = cur.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        print(f"get_latest_receipt_id error: {e}")
+        return None
+    finally:
+        conn.close()
