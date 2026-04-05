@@ -13,13 +13,15 @@ import io
 from scanner.engine import scan_url
 from receipt.generator import generate_receipt, verify_receipt, format_receipt_summary
 from receipt.pdf_generator import generate_pdf
+import psycopg2.extras
 from database import (
     queue_sequence, cancel_all_sequences, init_email_queue,
     init_db, save_receipt, get_receipt, get_receipts_by_domain,
     upsert_registry, get_registry, log_evidence, get_evidence_log,
     log_scan_alert,
     create_fix_request, get_fix_requests_by_domain,
-    update_fix_request, get_all_pending_fix_domains
+    update_fix_request, get_all_pending_fix_domains,
+    get_conn
 )
 from emailer import send_activation_receipt, send_scan_alert, send_fix_confirmation_email, send_free_summary_email
 from confirmation import run_confirmation_scan
@@ -617,6 +619,152 @@ def gumroad_webhook():
         print(f"[WEBHOOK] Error: {traceback.format_exc()}")
         return jsonify({"received": True, "activated": False,
                         "reason": "Internal error"}), 200
+
+
+# ── Admin Dashboard Endpoint ──────────────────────────────────────────────────
+
+ADMIN_KEY = os.environ.get('ADMIN_KEY', 'IDR-ADMIN-2026')
+
+
+@app.route('/api/admin/members', methods=['GET'])
+def admin_members():
+    """
+    Single aggregated call for the admin dashboard.
+    Protected by ?key= query param.
+    Returns: members, free_scanners, next_emails, stats.
+    """
+    if request.args.get('key', '') != ADMIN_KEY:
+        return _error('Unauthorized', 401)
+
+    if not db_available:
+        return _error('Database required for admin endpoint.', 503)
+
+    conn = get_conn()
+    if not conn:
+        return _error('Database connection failed.', 503)
+
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+
+            # Members: join registry → receipts (latest) to get email + receipt_id
+            cur.execute("""
+                SELECT
+                    r.domain,
+                    r.registry_id,
+                    r.status,
+                    r.latest_score,
+                    r.critical_count,
+                    r.scan_count,
+                    r.last_scanned,
+                    r.badge_active,
+                    r.activated_by   AS email,
+                    rec.receipt_id
+                FROM registry r
+                LEFT JOIN LATERAL (
+                    SELECT receipt_id
+                    FROM receipts
+                    WHERE domain = r.domain
+                    ORDER BY timestamp_utc DESC
+                    LIMIT 1
+                ) rec ON true
+                ORDER BY r.last_scanned DESC NULLS LAST
+            """)
+            members_raw = cur.fetchall()
+            members = []
+            for m in members_raw:
+                members.append({
+                    'domain':         m['domain'],
+                    'email':          m['email'] or '',
+                    'registry_id':    m['registry_id'],
+                    'status':         m['status'],
+                    'latest_score':   m['latest_score'],
+                    'critical_count': m['critical_count'],
+                    'scan_count':     m['scan_count'],
+                    'last_scanned':   m['last_scanned'].isoformat() if m['last_scanned'] else None,
+                    'badge_active':   m['badge_active'],
+                    'receipt_id':     m['receipt_id'] or '',
+                })
+
+            # Status counts
+            cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE status = 'active')     AS active,
+                    COUNT(*) FILTER (WHERE status = 'monitoring') AS monitoring,
+                    COUNT(*) FILTER (WHERE status = 'expired')    AS expired,
+                    COUNT(*)                                       AS total
+                FROM registry
+            """)
+            counts = dict(cur.fetchone())
+
+            # Free scanners: latest step per email in free_scanner sequence (not cancelled)
+            cur.execute("""
+                SELECT DISTINCT ON (email)
+                    email,
+                    domain,
+                    step        AS sequence_step,
+                    send_after  AS next_email_at,
+                    created_at  AS scanned_at
+                FROM email_queue
+                WHERE sequence = 'free_scanner'
+                  AND cancelled = FALSE
+                ORDER BY email, created_at DESC
+            """)
+            free_raw = cur.fetchall()
+            free_scanners = []
+            for f in free_raw:
+                free_scanners.append({
+                    'email':         f['email'],
+                    'domain':        f['domain'],
+                    'sequence_step': f['sequence_step'],
+                    'next_email_at': f['next_email_at'].isoformat() if f['next_email_at'] else None,
+                    'scanned_at':    f['scanned_at'].isoformat() if f['scanned_at'] else None,
+                })
+
+            # Total pending emails
+            cur.execute("""
+                SELECT COUNT(*) AS queued
+                FROM email_queue
+                WHERE sent = FALSE AND cancelled = FALSE
+            """)
+            queued_count = cur.fetchone()['queued']
+
+            # Next 20 emails due (queue panel)
+            cur.execute("""
+                SELECT email, domain, sequence, step, send_after
+                FROM email_queue
+                WHERE sent = FALSE AND cancelled = FALSE
+                ORDER BY send_after ASC
+                LIMIT 20
+            """)
+            next_emails = []
+            for e in cur.fetchall():
+                next_emails.append({
+                    'email':      e['email'],
+                    'domain':     e['domain'],
+                    'sequence':   e['sequence'],
+                    'step':       e['step'],
+                    'send_after': e['send_after'].isoformat() if e['send_after'] else None,
+                })
+
+        return jsonify({
+            'members':       members,
+            'free_scanners': free_scanners,
+            'next_emails':   next_emails,
+            'stats': {
+                'total_members':       counts['total'],
+                'active':              counts['active'],
+                'monitoring':          counts['monitoring'],
+                'expired':             counts['expired'],
+                'total_free_scanners': len(free_scanners),
+                'emails_queued':       queued_count,
+            }
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'Admin query failed: {str(e)}', 500)
+    finally:
+        conn.close()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
