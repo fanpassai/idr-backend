@@ -1100,3 +1100,87 @@ def _send_magic_link_email(email, magic_url):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
     app.run(host='0.0.0.0', port=port, debug=False)
+# ── Support Escalation Endpoint ───────────────────────────────────────────────
+
+@app.route('/api/support/escalate', methods=['POST', 'OPTIONS'])
+def support_escalate():
+    """
+    Receives a legal escalation from Reid and emails support@idrshield.com.
+    Body: { name, email, domain, phone, description, conversation_summary }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        body = request.get_json(silent=True) or {}
+        name        = body.get('name', '').strip()
+        email       = body.get('email', '').strip()
+        domain      = body.get('domain', '').strip()
+        phone       = body.get('phone', '').strip()
+        description = body.get('description', '').strip()
+        convo       = body.get('conversation_summary', '').strip()
+
+        if not name or not email or not description:
+            return _error('name, email, and description required.', 400)
+
+        from emailer import _send
+
+        subject = f'[LEGAL ESCALATION] {domain or email} — Action Required'
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:40px 20px;">
+<div style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">
+  <div style="background:#0A0E1A;padding:24px 32px;border-bottom:3px solid #C9A84C;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(201,168,76,0.7);margin:0 0 6px;">IDR Shield — Legal Escalation</p>
+    <h1 style="font-size:20px;font-weight:normal;color:#FAF7F2;margin:0;">Action Required</h1>
+  </div>
+  <div style="padding:28px 32px;border-bottom:1px solid #f0ede6;">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;font-family:Arial,sans-serif;">
+      <tr><td style="padding:6px 0;color:#999;width:120px;">Name</td><td style="padding:6px 0;color:#333;font-weight:600;">{name}</td></tr>
+      <tr><td style="padding:6px 0;color:#999;">Email</td><td style="padding:6px 0;color:#333;">{email}</td></tr>
+      <tr><td style="padding:6px 0;color:#999;">Domain</td><td style="padding:6px 0;color:#333;">{domain or '—'}</td></tr>
+      <tr><td style="padding:6px 0;color:#999;">Phone</td><td style="padding:6px 0;color:#333;">{phone or '—'}</td></tr>
+    </table>
+  </div>
+  <div style="padding:28px 32px;border-bottom:1px solid #f0ede6;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C9A84C;margin:0 0 10px;">Situation Description</p>
+    <p style="font-family:Georgia,serif;font-size:14px;color:#333;line-height:1.7;margin:0;">{description}</p>
+  </div>
+  {'<div style="padding:28px 32px;background:#fafafa;"><p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#999;margin:0 0 10px;">Conversation Summary</p><pre style="font-family:Georgia,serif;font-size:12px;color:#555;line-height:1.7;white-space:pre-wrap;margin:0;">' + convo + '</pre></div>' if convo else ''}
+  <div style="padding:20px 32px;background:#0A0E1A;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;color:rgba(250,247,242,0.3);margin:0;">
+      IDR Shield · Escalated via Reid Support Specialist · {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}
+    </p>
+  </div>
+</div>
+</body></html>"""
+
+        text = f"""IDR LEGAL ESCALATION — ACTION REQUIRED
+
+Name:   {name}
+Email:  {email}
+Domain: {domain or '—'}
+Phone:  {phone or '—'}
+
+Description:
+{description}
+
+{'Conversation Summary:' + chr(10) + convo if convo else ''}
+
+Escalated via Reid — {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')}
+"""
+        sent = _send('support@idrshield.com', subject, html, text)
+
+        if db_available and domain:
+            log_evidence(
+                domain.replace('www.', ''),
+                'SUPPORT-ESCALATION',
+                'LEGAL_ESCALATION',
+                f"Escalated by {name} ({email}) via Reid"
+            )
+
+        return jsonify({'success': True, 'sent': sent}), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'Escalation error: {str(e)}', 500)
+
