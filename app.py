@@ -13,7 +13,10 @@ import io
 from scanner.engine import scan_url
 from receipt.generator import generate_receipt, verify_receipt, format_receipt_summary
 from receipt.pdf_generator import generate_pdf
+import hashlib
+import secrets
 import psycopg2.extras
+from datetime import timedelta
 from database import (
     queue_sequence, cancel_all_sequences, init_email_queue,
     init_db, save_receipt, get_receipt, get_receipts_by_domain,
@@ -21,7 +24,12 @@ from database import (
     log_scan_alert,
     create_fix_request, get_fix_requests_by_domain,
     update_fix_request, get_all_pending_fix_domains,
-    get_conn
+    get_conn,
+    init_auth_schema,
+    create_magic_token, consume_magic_token,
+    create_session_token, validate_session_token, revoke_session_token,
+    get_member_dashboard, get_member_evidence,
+    get_member_fixes, get_latest_receipt_id,
 )
 from emailer import send_activation_receipt, send_scan_alert, send_fix_confirmation_email, send_free_summary_email
 from confirmation import run_confirmation_scan
@@ -39,6 +47,7 @@ RECEIPT_STORE = {}
 # Initialize database on startup
 db_available = init_db()
 init_email_queue()
+init_auth_schema()
 start_cron_scheduler()
 
 
@@ -765,6 +774,323 @@ def admin_members():
         return _error(f'Admin query failed: {str(e)}', 500)
     finally:
         conn.close()
+
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+
+MAGIC_LINK_EXPIRY_MINUTES = 15
+SESSION_EXPIRY_DAYS       = 30
+PORTAL_BASE_URL           = os.environ.get('PORTAL_BASE_URL', 'https://idrshield.com')
+
+
+def _hash_token(token):
+    """SHA-256 hash a token before storing. Never store raw tokens."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _get_session_email(req):
+    """
+    Extract and validate session token from Authorization header.
+    Returns email string if valid, None if missing/invalid/expired.
+    Header: Authorization: Bearer <token>
+    """
+    auth = req.headers.get('Authorization', '')
+    if not auth.startswith('Bearer '):
+        return None
+    raw_token = auth[7:].strip()
+    if not raw_token:
+        return None
+    return validate_session_token(_hash_token(raw_token))
+
+
+def _auth_required(req):
+    """
+    Call at top of any protected endpoint.
+    Returns (email, None) on success or (None, error_response) on failure.
+    """
+    email = _get_session_email(req)
+    if not email:
+        return None, _error('Unauthorized — invalid or expired session.', 401)
+    return email, None
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+@app.route('/api/auth/request', methods=['POST', 'OPTIONS'])
+def auth_request():
+    """
+    Step 1 of magic link flow.
+    Body: { email: str }
+    Always returns 200 to avoid leaking whether email is registered.
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        body  = request.get_json(silent=True) or {}
+        email = body.get('email', '').strip().lower()
+
+        if not email or '@' not in email:
+            return _error('Valid email required.', 400)
+        if not db_available:
+            return _error('Service unavailable.', 503)
+
+        conn_check = get_conn()
+        email_known = False
+        if conn_check:
+            try:
+                with conn_check.cursor() as cur:
+                    cur.execute(
+                        "SELECT 1 FROM registry WHERE activated_by = %s LIMIT 1",
+                        (email,)
+                    )
+                    email_known = cur.fetchone() is not None
+            finally:
+                conn_check.close()
+
+        if email_known:
+            raw_token  = secrets.token_hex(32)
+            token_hash = _hash_token(raw_token)
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=MAGIC_LINK_EXPIRY_MINUTES)
+            ip         = request.remote_addr
+            ok = create_magic_token(email, token_hash, expires_at, ip)
+            if ok:
+                magic_url = f"{PORTAL_BASE_URL}/idrshield_portal.html?token={raw_token}"
+                _send_magic_link_email(email, magic_url)
+                print(f"[AUTH] Magic link sent to {email}")
+
+        return jsonify({
+            'success': True,
+            'message': 'If that email is registered, a login link has been sent.'
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'Auth error: {str(e)}', 500)
+
+
+@app.route('/api/auth/verify', methods=['POST', 'OPTIONS'])
+def auth_verify():
+    """
+    Step 2 of magic link flow.
+    Body: { token: str }
+    Consumes magic link token, issues 30-day session token.
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        body  = request.get_json(silent=True) or {}
+        token = body.get('token', '').strip()
+        if not token:
+            return _error('Token required.', 400)
+        if not db_available:
+            return _error('Service unavailable.', 503)
+
+        ip         = request.remote_addr
+        token_hash = _hash_token(token)
+        email      = consume_magic_token(token_hash, ip)
+
+        if not email:
+            return _error('This link is invalid, expired, or has already been used.', 401)
+
+        session_raw  = secrets.token_hex(32)
+        session_hash = _hash_token(session_raw)
+        expires_at   = datetime.now(timezone.utc) + timedelta(days=SESSION_EXPIRY_DAYS)
+
+        ok = create_session_token(email, session_hash, expires_at, ip)
+        if not ok:
+            return _error('Could not create session.', 500)
+
+        print(f"[AUTH] Session issued for {email}")
+        return jsonify({
+            'success':       True,
+            'session_token': session_raw,
+            'email':         email,
+            'expires_at':    expires_at.isoformat(),
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'Auth error: {str(e)}', 500)
+
+
+@app.route('/api/auth/me', methods=['GET'])
+def auth_me():
+    """Validate session and return member identity. Called by portal on every load."""
+    email, err = _auth_required(request)
+    if err:
+        return err
+    return jsonify({'authenticated': True, 'email': email}), 200
+
+
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+def auth_logout():
+    """Revoke the current session token."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        raw_token = auth[7:].strip()
+        if raw_token:
+            revoke_session_token(_hash_token(raw_token))
+    return jsonify({'success': True}), 200
+
+
+# ── Member portal endpoints ───────────────────────────────────────────────────
+
+@app.route('/api/member/dashboard', methods=['GET'])
+def member_dashboard():
+    """All domains + scan history for the authenticated member."""
+    email, err = _auth_required(request)
+    if err:
+        return err
+    try:
+        data = get_member_dashboard(email)
+        if data is None:
+            return _error('No registry record found for this account.', 404)
+        return jsonify({'email': email, 'domains': data}), 200
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/member/evidence/<domain>', methods=['GET'])
+def member_evidence(domain):
+    """Compliance evidence log — ownership verified by session."""
+    email, err = _auth_required(request)
+    if err:
+        return err
+    try:
+        log = get_member_evidence(email, domain)
+        if log is None:
+            return _error('Domain not found or not owned by this account.', 403)
+        return jsonify({'domain': domain, 'entries': log, 'count': len(log)}), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+@app.route('/api/member/fixes/<domain>', methods=['GET'])
+def member_fixes(domain):
+    """Fix request history — ownership verified by session."""
+    email, err = _auth_required(request)
+    if err:
+        return err
+    try:
+        fixes = get_member_fixes(email, domain)
+        if fixes is None:
+            return _error('Domain not found or not owned by this account.', 403)
+        return jsonify({'domain': domain, 'fixes': fixes}), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+@app.route('/api/member/receipt/<domain>/latest/pdf', methods=['GET'])
+def member_latest_pdf(domain):
+    """Download the most recent Defense Package PDF for a domain."""
+    email, err = _auth_required(request)
+    if err:
+        return err
+    try:
+        receipt_id = get_latest_receipt_id(email, domain)
+        if not receipt_id:
+            return _error('No receipt found for this domain.', 404)
+        receipt = get_receipt(receipt_id)
+        if not receipt:
+            return _error('Receipt data not found.', 404)
+        pdf_bytes = generate_pdf(receipt)
+        filename  = f"IDR-DefensePackage-{domain}-{receipt_id[:8]}.pdf"
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'PDF error: {str(e)}', 500)
+
+
+@app.route('/api/member/badge-code/<domain>', methods=['GET'])
+def member_badge_code(domain):
+    """Return personalised badge and chip embed code for a domain."""
+    email, err = _auth_required(request)
+    if err:
+        return err
+    try:
+        reg = get_registry(domain)
+        if not reg or reg.get('activated_by') != email:
+            return _error('Domain not found or not owned by this account.', 403)
+        clean       = domain.replace('www.', '')
+        registry_id = reg['registry_id']
+        badge_code  = (
+            f'<script src="https://idrshield.com/badge.js"\n'
+            f'        data-store="{clean}"\n'
+            f'        data-id="{registry_id}"\n'
+            f'        data-theme="dark"\n'
+            f'        data-size="52"\n'
+            f'        data-tier="founding">\n'
+            f'</script>'
+        )
+        chip_code = (
+            f'<script src="https://idrshield.com/chip.js"\n'
+            f'        data-store="{clean}"\n'
+            f'        data-id="{registry_id}"\n'
+            f'        data-format="pill"\n'
+            f'        data-theme="dark"\n'
+            f'        data-tier="founding">\n'
+            f'</script>'
+        )
+        return jsonify({
+            'domain':       clean,
+            'registry_id':  registry_id,
+            'badge_code':   badge_code,
+            'chip_code':    chip_code,
+            'status':       reg['status'],
+            'badge_active': reg['badge_active'],
+        }), 200
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+# ── Magic link email sender ───────────────────────────────────────────────────
+
+def _send_magic_link_email(email, magic_url):
+    from emailer import _send
+    subject = 'Your IDR Shield login link'
+    expiry_str = (datetime.now(timezone.utc) + timedelta(minutes=MAGIC_LINK_EXPIRY_MINUTES)).strftime('%B %d, %Y at %H:%M UTC')
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="font-family:Georgia,serif;background:#f5f5f5;margin:0;padding:40px 20px;">
+<div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">
+  <div style="background:#0A0E1A;padding:28px 36px;border-bottom:3px solid #C9A84C;">
+    <p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 6px;">Institute of Digital Remediation</p>
+    <h1 style="font-size:20px;font-weight:normal;color:#FAF7F2;margin:0;">Member Portal Access</h1>
+  </div>
+  <div style="padding:32px 36px;">
+    <p style="font-family:Arial,sans-serif;font-size:13px;color:#333;line-height:1.7;margin:0 0 24px;">
+      Click the button below to access your IDR Shield member portal.
+      This link expires in <strong>15 minutes</strong> and can only be used once.
+    </p>
+    <div style="text-align:center;margin:28px 0;">
+      <a href="{magic_url}" style="display:inline-block;background:#C9A84C;color:#0A0E1A;font-family:Arial,sans-serif;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;padding:15px 36px;text-decoration:none;">
+        Access My Portal &rarr;
+      </a>
+    </div>
+    <p style="font-family:Arial,sans-serif;font-size:11px;color:#999;line-height:1.6;margin:0;">
+      If you didn't request this, ignore this email — your account is safe.<br>
+      Link expires: {expiry_str}
+    </p>
+  </div>
+  <div style="padding:18px 36px;background:#0A0E1A;">
+    <p style="font-family:Arial,sans-serif;font-size:10px;color:rgba(250,247,242,0.3);margin:0;">
+      Institute of Digital Remediation &middot; idrshield.com &middot; hello@idrshield.com
+    </p>
+  </div>
+</div>
+</body></html>"""
+    text = f"Your IDR Shield portal login link:\n\n{magic_url}\n\nExpires in 15 minutes. Single use only.\nLink expires: {expiry_str}"
+    return _send(email, subject, html, text)
+
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
