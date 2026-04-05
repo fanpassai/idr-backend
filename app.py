@@ -1184,3 +1184,76 @@ Escalated via Reid — {datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M 
         print(traceback.format_exc())
         return _error(f'Escalation error: {str(e)}', 500)
 
+
+
+# ── Reid Chat Proxy ───────────────────────────────────────────────────────────
+
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
+
+
+@app.route('/api/support/chat', methods=['POST', 'OPTIONS'])
+def support_chat():
+    """
+    Proxies Reid's conversation to Claude via the Anthropic API.
+    Keeps the API key server-side, never exposed to the browser.
+    Body: { system: str, messages: list, context: str }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        if not ANTHROPIC_API_KEY:
+            return _error('AI service not configured.', 503)
+
+        body     = request.get_json(silent=True) or {}
+        system   = body.get('system', '')
+        messages = body.get('messages', [])
+
+        if not messages:
+            return _error('messages required.', 400)
+
+        # Validate messages are safe (role must be user or assistant)
+        clean_messages = []
+        for m in messages:
+            role    = m.get('role', '')
+            content = m.get('content', '')
+            if role in ('user', 'assistant') and isinstance(content, str) and content.strip():
+                clean_messages.append({'role': role, 'content': content.strip()})
+
+        if not clean_messages:
+            return _error('No valid messages provided.', 400)
+
+        import urllib.request as urlreq
+        import json as _json
+
+        payload = {
+            'model':      'claude-sonnet-4-20250514',
+            'max_tokens': 1024,
+            'system':     system,
+            'messages':   clean_messages,
+        }
+
+        req = urlreq.Request(
+            'https://api.anthropic.com/v1/messages',
+            data=_json.dumps(payload).encode('utf-8'),
+            headers={
+                'x-api-key':         ANTHROPIC_API_KEY,
+                'anthropic-version': '2023-06-01',
+                'Content-Type':      'application/json',
+            },
+            method='POST'
+        )
+
+        with urlreq.urlopen(req, timeout=30) as resp:
+            data  = _json.loads(resp.read().decode('utf-8'))
+            reply = ''.join(
+                b.get('text', '')
+                for b in data.get('content', [])
+                if b.get('type') == 'text'
+            )
+
+        return jsonify({'success': True, 'reply': reply}), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'Chat error: {str(e)}', 500)
+
