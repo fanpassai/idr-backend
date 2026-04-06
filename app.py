@@ -855,7 +855,7 @@ def auth_request():
             ip         = request.remote_addr
             ok = create_magic_token(email, token_hash, expires_at, ip)
             if ok:
-                magic_url = f"{PORTAL_BASE_URL}/idrshield_portal.html?token={raw_token}"
+                magic_url = f"{PORTAL_BASE_URL}/portal?token={raw_token}"
                 _send_magic_link_email(email, magic_url)
                 print(f"[AUTH] Magic link sent to {email}")
 
