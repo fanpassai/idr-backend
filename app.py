@@ -307,7 +307,7 @@ def badge_image(domain):
     """SVG badge image for Wix/Webflow — no JS required."""
     try:
         theme = request.args.get('theme', 'dark')
-        size  = max(28, min(int(request.args.get('size', 52)), 160))
+        size  = max(52, min(int(request.args.get('size', 104)), 160))
 
         status = 'unverified'
         if db_available:
@@ -318,33 +318,57 @@ def badge_image(domain):
         if status == 'active':
             rc, lc, label, op = '#C9A84C', '#E2C97E', 'ACTIVE', '0.95'
         elif status == 'monitoring':
-            rc, lc, label, op = '#C8C8D8', '#C8C8D8', 'MONITORING', '0.75'
+            rc, lc, label, op = '#C8C8D8', '#C8C8D8', 'MONITORING', '0.72'
         else:
             rc, lc, label, op = '#555555', '#555555', 'UNVERIFIED', '0.45'
 
-        cx     = size / 2
-        ro     = cx - 0.5
-        ri     = ro * 0.5
-        sw     = max(1.5, size * 0.03)
-        fi     = size * 0.26
-        fl     = size * 0.07
-        ly     = cx + ri * 0.22
-        lx1    = cx - ri * 0.55
-        lx2    = cx + ri * 0.55
-        ty     = cx + ri * 0.55
-        iy     = cx - ri * 0.07
-        fill   = 'none' if theme == 'outline' else '#0A0E1A'
-        bg     = ('<circle cx="{cx}" cy="{cx}" r="{ro}" fill="{fill}"/>'.format(
-                    cx=cx, ro=ro, fill=fill)) if fill != 'none' else ''
+        cx   = size / 2
+        ro   = cx - 0.5
+        ri   = ro * 0.685
+        sw   = max(1.5, size * 0.025)
+        # IDR text size — ~27% of size
+        fi   = round(size * 0.27, 1)
+        # Status label — much smaller, ~7.5% of size
+        fl   = round(size * 0.075, 1)
+        # Arc text — tiny
+        fa   = round(size * 0.058, 1)
+        fb   = round(size * 0.052, 1)
+        # Geometry
+        ly   = cx + ri * 0.18
+        lx1  = cx - ri * 0.52
+        lx2  = cx + ri * 0.52
+        ty   = cx + ri * 0.52
+        iy   = cx - ri * 0.06
+        # Arc paths
+        arc_r = ro - 2
+        ax1  = round(cx - arc_r, 2)
+        ax2  = round(cx + arc_r, 2)
+        fill = 'none' if theme == 'outline' else '#0A0E1A'
+        bg   = '<circle cx="{cx}" cy="{cx}" r="{ro}" fill="{fill}"/>'.format(
+                cx=cx, ro=ro, fill=fill) if fill != 'none' else ''
 
         svg = (
             '<svg xmlns="http://www.w3.org/2000/svg"'
             ' viewBox="0 0 {sz} {sz}" width="{sz}" height="{sz}">'
+            '<defs>'
+            '<path id="bT{sz}" d="M {ax1},{cx} A {ar},{ar} 0 0,1 {ax2},{cx}"/>'
+            '<path id="bB{sz}" d="M {ax1},{cx} A {ar},{ar} 0 0,0 {ax2},{cx}"/>'
+            '</defs>'
             '{bg}'
             '<circle cx="{cx}" cy="{cx}" r="{ro}" fill="none"'
             ' stroke="{rc}" stroke-width="{sw}" opacity="{op}"/>'
             '<circle cx="{cx}" cy="{cx}" r="{ri}" fill="none"'
-            ' stroke="{rc}" stroke-width="0.7" opacity="0.28"/>'
+            ' stroke="{rc}" stroke-width="{isw}" opacity="0.28"/>'
+            '<text font-family="Arial,sans-serif" font-size="{fa}"'
+            ' font-weight="700" letter-spacing="1.2" fill="{rc}" opacity="0.88">'
+            '<textPath href="#bT{sz}" startOffset="50%"'
+            ' text-anchor="middle" dy="-4">INSTITUTE OF DIGITAL REMEDIATION</textPath>'
+            '</text>'
+            '<text font-family="Arial,sans-serif" font-size="{fb}"'
+            ' font-weight="600" letter-spacing="1.8" fill="{rc}" opacity="0.50">'
+            '<textPath href="#bB{sz}" startOffset="50%"'
+            ' text-anchor="middle" dy="7">FOUNDING MEMBER</textPath>'
+            '</text>'
             '<text x="{cx}" y="{iy}" font-family="Georgia,serif"'
             ' font-size="{fi}" font-weight="700" fill="{rc}"'
             ' text-anchor="middle" dominant-baseline="middle">IDR</text>'
@@ -352,14 +376,17 @@ def badge_image(domain):
             ' stroke="#8A6F2E" stroke-width="0.9" opacity="0.65"/>'
             '<text x="{cx}" y="{ty}" font-family="Arial,sans-serif"'
             ' font-size="{fl}" font-weight="600" fill="{lc}"'
-            ' text-anchor="middle" letter-spacing="1.2"'
+            ' text-anchor="middle" letter-spacing="1.5"'
             ' opacity="0.9">{label}</text>'
             '</svg>'
         ).format(
             sz=size, cx=cx, ro=ro, ri=ri, sw=sw,
-            fi=fi, fl=fl, ly=ly, lx1=lx1, lx2=lx2,
+            isw=max(0.6, size * 0.008),
+            fi=fi, fl=fl, fa=fa, fb=fb,
+            ly=ly, lx1=lx1, lx2=lx2,
             ty=ty, iy=iy, rc=rc, lc=lc, op=op,
-            label=label, bg=bg
+            label=label, bg=bg,
+            ax1=ax1, ax2=ax2, ar=arc_r
         )
 
         return svg, 200, {
@@ -370,12 +397,12 @@ def badge_image(domain):
 
     except Exception as e:
         fallback = ('<svg xmlns="http://www.w3.org/2000/svg"'
-                    ' viewBox="0 0 52 52" width="52" height="52">'
-                    '<circle cx="26" cy="26" r="25" fill="#0A0E1A"/>'
-                    '<circle cx="26" cy="26" r="25" fill="none"'
+                    ' viewBox="0 0 104 104" width="104" height="104">'
+                    '<circle cx="52" cy="52" r="51" fill="#0A0E1A"/>'
+                    '<circle cx="52" cy="52" r="51" fill="none"'
                     ' stroke="#555" stroke-width="1.5" opacity="0.45"/>'
-                    '<text x="26" y="26" font-family="Georgia,serif"'
-                    ' font-size="13" font-weight="700" fill="#555"'
+                    '<text x="52" y="52" font-family="Georgia,serif"'
+                    ' font-size="26" font-weight="700" fill="#555"'
                     ' text-anchor="middle" dominant-baseline="middle">IDR</text>'
                     '</svg>')
         return fallback, 200, {
