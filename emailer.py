@@ -5,8 +5,6 @@ Drop this file into the idr-backend repo root.
 """
 
 import os
-import sendgrid
-from sendgrid.helpers.mail import Mail
 
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
@@ -21,6 +19,8 @@ def _send(to_email, subject, html):
         print(f'[EMAIL] No SENDGRID_API_KEY — skipping: {subject}')
         return
     try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
         message = Mail(
             from_email=(FROM_EMAIL, FROM_NAME),
             to_emails=to_email,
