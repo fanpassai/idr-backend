@@ -375,14 +375,14 @@ def send_free_summary_email(email, receipt):
         display_date = (timestamp[:16].replace('T', ' ') + ' UTC') if timestamp else ''
 
     # State routing
-    if score >= 80:
+    if score >= 80:   # PASS: clean, minimal critical violations
         score_color  = '#27AE60'
         status_label = 'PASS'
         status_badge = 'Compliance Verified'
         badge_color  = '#27AE60'
         subject      = domain + ' passed — but your compliance record isn\'t protected yet'
         urgency, locked, bridge, cta_headline, cta_sub = _content_pass()
-    elif score >= 50:
+    elif score >= 60: # MONITORING: exposed but not worst profile
         score_color  = '#E9A030'
         status_label = 'MONITORING'
         status_badge = 'Remediation Required'
