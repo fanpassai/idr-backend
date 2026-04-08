@@ -47,7 +47,7 @@ def send_free_summary_email(email, receipt):
     timestamp   = sc.get('timestamp', '')
 
     try:
-        from datetime import datetime
+        from datetime import datetime, timezone, timedelta
         dt = datetime.strptime(timestamp[:19], '%Y-%m-%dT%H:%M:%S')
         display_date = dt.strftime('%b %-d, %Y · %H:%M UTC')
     except Exception:
@@ -71,7 +71,18 @@ def send_free_summary_email(email, receipt):
 
     subject = f'Your store scan results — {domain}'
 
-    cat_map    = {c['category']: c for c in cats} if cats else {}
+    # cats is a list of {name, slug, score, status, issues:[{severity,...}]}
+    # Build lookup by slug — handle slug variants like 'aria_links_contrast'
+    cat_map = {}
+    for c in (cats or []):
+        slug = c.get('slug', '')
+        cat_map[slug] = c
+        # normalize slug variants
+        if 'aria' in slug:
+            cat_map['aria_links'] = c
+        if 'contrast' in slug and 'aria' not in slug:
+            cat_map['contrast'] = c
+
     cat_labels = {
         'alt_text':          'Image Alt Text',
         'form_labels':       'Form Labels',
@@ -81,13 +92,17 @@ def send_free_summary_email(email, receipt):
         'aria_links':        'ARIA & Links',
     }
 
+    def _count_issues(cat_data, severity):
+        issues = cat_data.get('issues', [])
+        return sum(1 for iss in issues if iss.get('severity') == severity)
+
     cat_rows_html = ''
     row_bg = ['#FFFFFF', '#FAFAF8']
     for i, (cat_key, cat_name) in enumerate(cat_labels.items()):
         bg       = row_bg[i % 2]
         cat_data = cat_map.get(cat_key, {})
-        cat_crits = cat_data.get('critical', 0)
-        cat_total = cat_data.get('total', 0)
+        cat_crits = _count_issues(cat_data, 'critical')
+        cat_total = len(cat_data.get('issues', []))
         if cat_crits > 0:
             bar_color  = '#E05252'
             bar_width  = max(20, min(160, int(cat_crits * 20)))
@@ -393,3 +408,6 @@ def send_fix_confirmation_email(email, domain, categories, new_score):
 <tr><td bgcolor="#C9A84C" height="4" style="background-color:#C9A84C;font-size:0;">&nbsp;</td></tr>
 </table></td></tr></table></body></html>"""
     _send(email, subject, html)
+
+# Alias for backward compatibility with cron.py
+send_weekly_scan_alert = send_scan_alert
