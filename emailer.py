@@ -216,7 +216,7 @@ def send_free_summary_email(email, receipt):
 
         cat_rows_html += f'''
   <tr>
-    <td style="background:{bg};padding:0 40px;
+    <td bgcolor="{bg}" style="background:{bg};padding:0 40px;
                border-bottom:1px solid rgba(201,168,76,0.06);">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
@@ -308,8 +308,8 @@ def send_free_summary_email(email, receipt):
              font-family:Georgia,'Times New Roman',serif;">
 
 <table width="100%" cellpadding="0" cellspacing="0" border="0"
-       style="background:#060A14;">
-<tr><td align="center" style="padding:32px 16px;">
+       bgcolor="#060A14" style="background:#060A14;">
+<tr><td align="center" style="padding:32px 16px;" bgcolor="#060A14">
 
 <table width="600" cellpadding="0" cellspacing="0" border="0"
        style="max-width:600px;width:100%;
@@ -323,7 +323,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- HEADER -->
   <tr>
-    <td style="background:#08101f;padding:24px 40px 22px;">
+    <td bgcolor="#08101f" style="background:#08101f;padding:24px 40px 22px;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td style="vertical-align:middle;">
@@ -370,7 +370,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- DOMAIN BANNER -->
   <tr>
-    <td style="background:#060e1c;padding:20px 40px 18px;">
+    <td bgcolor="#060e1c" style="background:#060e1c;padding:20px 40px 18px;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td>
@@ -398,8 +398,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- SCORE BLOCK -->
   <tr>
-    <td style="background:linear-gradient(160deg,#0a1628 0%,#060e1c 100%);
-                padding:40px 40px 36px;">
+    <td bgcolor="#0a1628" style="background:#0a1628;padding:40px 40px 36px;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <!-- Score circle -->
@@ -407,9 +406,9 @@ def send_free_summary_email(email, receipt):
             <table cellpadding="0" cellspacing="0" border="0"
                    style="width:140px;height:140px;border-radius:50%;
                            border:2.5px solid {score_color};
-                           background:rgba(6,14,28,0.9);margin:0 auto;">
+                           background:#060e1c;margin:0 auto;" width="140">
               <tr>
-                <td align="center" style="vertical-align:middle;padding-top:4px;">
+                <td width="140" height="140" align="center" bgcolor="#060e1c" style="vertical-align:middle;padding-top:4px;background:#060e1c;">
                   <div style="font-family:Georgia,serif;font-size:62px;font-weight:700;
                                color:{score_color};line-height:1;">{score}</div>
                   <div style="font-family:Arial,Helvetica,sans-serif;font-size:7.5px;
@@ -496,7 +495,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- SURFACE SECTION -->
   <tr>
-    <td style="background:#060e1c;padding:32px 40px;">
+    <td bgcolor="#060e1c" style="background:#060e1c;padding:32px 40px;">
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:7.5px;font-weight:700;
                    letter-spacing:0.3em;text-transform:uppercase;
                    color:rgba(201,168,76,0.35);margin-bottom:6px;">
@@ -507,10 +506,10 @@ def send_free_summary_email(email, receipt):
         This summary does not include:
       </div>
       <table width="100%" cellpadding="0" cellspacing="0" border="0"
-             style="background:rgba(13,21,38,0.7);border:1px solid rgba(201,168,76,0.1);
+             bgcolor="#0d1526" style="background:#0d1526;border:1px solid rgba(201,168,76,0.1);
                      border-left:3px solid rgba(201,168,76,0.3);">
         <tr>
-          <td style="padding:24px 28px;">
+          <td bgcolor="#0d1526" style="padding:24px 28px;background:#0d1526;">
             {locked_html}
           </td>
         </tr>
@@ -520,7 +519,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- BRIDGE COPY -->
   <tr>
-    <td style="background:#08101f;padding:28px 40px;
+    <td bgcolor="#08101f" style="background:#08101f;padding:28px 40px;
                border-top:1px solid rgba(201,168,76,0.07);">
       <div style="font-family:Georgia,serif;font-size:18px;font-weight:700;
                    color:#F0E8D8;line-height:1.45;margin-bottom:12px;">
@@ -541,7 +540,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- FOUNDING CTA BLOCK -->
   <tr>
-    <td style="background:linear-gradient(160deg,#0d1a2e 0%,#060e1c 100%);
+    <td bgcolor="#0d1a2e" style="background:#0d1a2e;
                 padding:40px 40px 36px;border-top:1px solid rgba(201,168,76,0.15);">
 
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:7.5px;font-weight:700;
@@ -572,10 +571,10 @@ def send_free_summary_email(email, receipt):
 
       <!-- Price display -->
       <table width="100%" cellpadding="0" cellspacing="0" border="0"
-             style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.15);
+             bgcolor="#0d1526" style="background:#0d1526;border:1px solid rgba(201,168,76,0.15);
                      margin-bottom:24px;">
         <tr>
-          <td style="padding:20px 24px;">
+          <td bgcolor="#0d1526" style="padding:20px 24px;background:#0d1526;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td style="vertical-align:middle;">
@@ -623,7 +622,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- REGISTRY RECORD -->
   <tr>
-    <td style="background:#060e1c;padding:24px 40px;
+    <td bgcolor="#060e1c" style="background:#060e1c;padding:24px 40px;
                border-top:1px solid rgba(201,168,76,0.1);">
       <div style="font-family:Arial,Helvetica,sans-serif;font-size:7.5px;font-weight:700;
                    letter-spacing:0.24em;text-transform:uppercase;
@@ -657,7 +656,7 @@ def send_free_summary_email(email, receipt):
 
   <!-- FOOTER -->
   <tr>
-    <td style="background:#04080f;padding:18px 40px;
+    <td bgcolor="#04080f" style="background:#04080f;padding:18px 40px;
                border-top:1px solid rgba(201,168,76,0.07);">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
