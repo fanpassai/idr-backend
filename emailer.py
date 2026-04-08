@@ -288,7 +288,7 @@ def _content_fail():
         '<div style="font-family:Georgia,serif;font-size:14px;color:#777777;line-height:1.8;">Activating IDR Shield creates a timestamped compliance record from this moment forward. If you&rsquo;re ever challenged, the evidence log, the Defense Package, and the receipt are what stand between you and a five-figure settlement demand.</div>'
         '</td></tr>'
     )
-    return urgency, locked, bridge, 'Activate Your IDR Shield', 'Lock in founding access. First 500 stores only.'
+    return urgency, locked, bridge, 'Stop Being an Easy Target', 'Activate your defense record before someone else scans you first.'
 
 
 def _content_monitoring():
@@ -320,7 +320,7 @@ def _content_monitoring():
         '<div style="font-family:Georgia,serif;font-size:14px;color:#777777;line-height:1.8;">The moment you activate, IDR begins documenting your remediation effort &mdash; timestamped, hashed, publicly verifiable. If a demand letter arrives, your attorney doesn&rsquo;t say &ldquo;we&rsquo;re working on it.&rdquo; They produce the receipt, the evidence log, and the Defense Package. That&rsquo;s the difference between a $50,000 settlement and a dismissed claim.</div>'
         '</td></tr>'
     )
-    return urgency, locked, bridge, 'Activate Your IDR Shield', 'Turn your monitoring score into a documented defense.'
+    return urgency, locked, bridge, 'Make Your Remediation Effort Official', 'Open violations with a documented record are defensible. Without one, they aren\'t.'
 
 
 def _content_pass():
@@ -352,7 +352,7 @@ def _content_pass():
         '<div style="font-family:Georgia,serif;font-size:14px;color:#777777;line-height:1.8;">Founding members lock in $29/month permanently and get the gold seal no future member will ever receive. But more than that &mdash; they get a growing evidence record that compounds in value every week. The longer you&rsquo;re enrolled, the stronger your defense becomes.</div>'
         '</td></tr>'
     )
-    return urgency, locked, bridge, 'Lock In Your Clean Record', 'Your score is passing. Protect that status permanently.'
+    return urgency, locked, bridge, 'Your Score Is Clean. Now Make It Official.', 'A passing scan with no record is the same as no scan at all in a legal challenge.'
 
 
 # ── Main email function ───────────────────────────────────────────────────────
