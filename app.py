@@ -1203,6 +1203,38 @@ def _send_magic_link_email(email, magic_url):
 
 
 
+# ── Public Stats Endpoint ─────────────────────────────────────────────────────
+
+@app.route('/api/stats', methods=['GET'])
+def public_stats():
+    """
+    Public endpoint — returns only member count and spots remaining.
+    No authentication required. No sensitive data exposed.
+    Used by the homepage founding member counter.
+    """
+    FOUNDING_TOTAL = 500
+    try:
+        if not db_available:
+            return jsonify({'total_members': 0, 'spots_remaining': FOUNDING_TOTAL, 'founding_open': True}), 200
+        conn = get_conn()
+        if not conn:
+            return jsonify({'total_members': 0, 'spots_remaining': FOUNDING_TOTAL, 'founding_open': True}), 200
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM registry")
+                total = cur.fetchone()[0]
+        finally:
+            conn.close()
+        remaining     = max(0, FOUNDING_TOTAL - total)
+        founding_open = total < FOUNDING_TOTAL
+        return jsonify({
+            'total_members':   total,
+            'spots_remaining': remaining,
+            'founding_open':   founding_open,
+        }), 200
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'total_members': 0, 'spots_remaining': FOUNDING_TOTAL, 'founding_open': True}), 200
 # ── Entry point ───────────────────────────────────────────────────────────────
 # NOTE: In production, Railway uses gunicorn (see Dockerfile).
 # This block only runs when you execute `python app.py` locally.
