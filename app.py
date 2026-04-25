@@ -1399,3 +1399,42 @@ def support_chat():
         print(traceback.format_exc())
         return _error(f'Chat error: {str(e)}', 500)
 
+        @app.route('/api/hhs/registry/<path:domain>', methods=['GET'])
+def hhs_registry(domain):
+    domain = domain.lower().strip().rstrip('/')
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT status, registry_id, last_scanned, latest_score,
+                   critical_count, scan_count
+            FROM   registry
+            WHERE  domain = %s
+              AND  hhs_enrolled = TRUE
+        """, (domain,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            return jsonify({'error': 'not enrolled', 'status': 'not_monitored'}), 404
+        status = row[0]
+        if status in ('active', 'monitoring'):
+            display_status = 'active'
+        elif status in ('manual_verified', 'verified'):
+            display_status = 'on_record'
+        else:
+            return jsonify({'error': 'not enrolled', 'status': 'not_monitored'}), 404
+        return jsonify({
+            'status':         display_status,
+            'domain':         domain,
+            'registry_id':    row[1],
+            'registry_url':   f'https://idrshield.com/hhs-verify/{domain}',
+            'last_scanned':   str(row[2]) if row[2] else None,
+            'latest_score':   row[3],
+            'critical_count': row[4],
+            'scan_count':     row[5],
+            'sector':         'hhs',
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
