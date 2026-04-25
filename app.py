@@ -1158,3 +1158,99 @@ def hhs_registry(domain):
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+import stripe
+
+STRIPE_WEBHOOK_SECRET_HHS = os.environ.get('STRIPE_WEBHOOK_SECRET_HHS', '')
+
+
+@app.route('/api/webhook/stripe/hhs', methods=['POST'])
+def stripe_hhs_webhook():
+    payload = request.get_data()
+    sig = request.headers.get('Stripe-Signature', '')
+    if not STRIPE_WEBHOOK_SECRET_HHS:
+        return _error('Webhook secret not configured', 500)
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig, STRIPE_WEBHOOK_SECRET_HHS
+        )
+    except stripe.error.SignatureVerificationError as e:
+        print(f'[HHS WEBHOOK] Signature failed: {e}')
+        return _error('Invalid signature', 400)
+    except Exception as e:
+        print(f'[HHS WEBHOOK] Parse error: {e}')
+        return _error('Bad payload', 400)
+    if event['type'] != 'checkout.session.completed':
+        return jsonify({'received': True, 'action': 'ignored'}), 200
+    session = event['data']['object']
+    domain = (session.get('client_reference_id') or '').strip().lower()
+    domain = domain.replace('https://', '').replace('http://', '').split('/')[0]
+    if not domain:
+        return jsonify({'received': True, 'action': 'no_domain'}), 200
+    amount = session.get('amount_total', 0)
+    email = session.get('customer_details', {}).get('email', '')
+    is_audit = (amount == 49700)
+    is_monitoring = (amount == 4900)
+    print(f'[HHS WEBHOOK] domain={domain} email={email} amount={amount}')
+    if not db_available:
+        return jsonify({'received': True, 'action': 'db_unavailable'}), 200
+    conn = get_conn()
+    if not conn:
+        return jsonify({'received': True, 'action': 'db_error'}), 200
+    try:
+        with conn.cursor() as cur:
+            if is_audit:
+                cur.execute("""
+                    INSERT INTO registry
+                        (domain, status, hhs_enrolled, activated_by, created_at, updated_at)
+                    VALUES
+                        (%s, 'manual_verified', TRUE, %s, NOW(), NOW())
+                    ON CONFLICT (domain) DO UPDATE SET
+                        status = 'manual_verified',
+                        hhs_enrolled = TRUE,
+                        activated_by = COALESCE(registry.activated_by, EXCLUDED.activated_by),
+                        updated_at = NOW()
+                """, (domain, email))
+                conn.commit()
+                log_evidence(domain, 'STRIPE-HHS-AUDIT', 'HHS_AUDIT_PAYMENT',
+                    f'$497 audit payment from {email}')
+                if email:
+                    try:
+                        from hhs_emailer import send_hhs_activation_confirmation
+                        send_hhs_activation_confirmation(email, domain)
+                    except Exception as e:
+                        print(f'[HHS WEBHOOK] Email error: {e}')
+                return jsonify({'received': True, 'action': 'hhs_audit_activated',
+                    'domain': domain, 'status': 'manual_verified'}), 200
+            elif is_monitoring:
+                cur.execute("""
+                    INSERT INTO registry
+                        (domain, status, hhs_enrolled, activated_by, created_at, updated_at)
+                    VALUES
+                        (%s, 'active', TRUE, %s, NOW(), NOW())
+                    ON CONFLICT (domain) DO UPDATE SET
+                        status = 'active',
+                        hhs_enrolled = TRUE,
+                        updated_at = NOW()
+                """, (domain, email))
+                conn.commit()
+                log_evidence(domain, 'STRIPE-HHS-MONITORING', 'HHS_MONITORING_PAYMENT',
+                    f'$49/mo monitoring payment from {email}')
+                if email:
+                    try:
+                        from hhs_emailer import send_hhs_monitoring_welcome
+                        send_hhs_monitoring_welcome(email, domain)
+                    except Exception as e:
+                        print(f'[HHS WEBHOOK] Email error: {e}')
+                return jsonify({'received': True, 'action': 'hhs_monitoring_activated',
+                    'domain': domain, 'status': 'active'}), 200
+            else:
+                return jsonify({'received': True, 'action': 'unknown_amount',
+                    'amount': amount}), 200
+    except Exception as e:
+        print(f'[HHS WEBHOOK] DB error: {traceback.format_exc()}')
+        conn.rollback()
+        return jsonify({'received': True, 'action': 'db_error'}), 200
+    finally:
+        conn.close()
