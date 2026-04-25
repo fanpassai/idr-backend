@@ -1404,13 +1404,13 @@ def hhs_registry(domain):
     domain = domain.lower().strip().rstrip('/')
     try:
         conn = get_db_connection()
-        cur  = conn.cursor()
+        cur = conn.cursor()
         cur.execute("""
             SELECT status, registry_id, last_scanned, latest_score,
                    critical_count, scan_count
-            FROM   registry
-            WHERE  domain = %s
-              AND  hhs_enrolled = TRUE
+            FROM registry
+            WHERE domain = %s
+            AND hhs_enrolled = TRUE
         """, (domain,))
         row = cur.fetchone()
         cur.close()
@@ -1425,16 +1425,15 @@ def hhs_registry(domain):
         else:
             return jsonify({'error': 'not enrolled', 'status': 'not_monitored'}), 404
         return jsonify({
-            'status':         display_status,
-            'domain':         domain,
-            'registry_id':    row[1],
-            'registry_url':   f'https://idrshield.com/hhs-verify/{domain}',
-            'last_scanned':   str(row[2]) if row[2] else None,
-            'latest_score':   row[3],
+            'status': display_status,
+            'domain': domain,
+            'registry_id': row[1],
+            'registry_url': 'https://idrshield.com/hhs-verify/' + domain,
+            'last_scanned': str(row[2]) if row[2] else None,
+            'latest_score': row[3],
             'critical_count': row[4],
-            'scan_count':     row[5],
-            'sector':         'hhs',
+            'scan_count': row[5],
+            'sector': 'hhs',
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
