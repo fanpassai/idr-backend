@@ -499,3 +499,215 @@ def _compare_row(text):
         '</td></tr></table>'
         '</td></tr>'
     )
+
+
+# ── EMAIL 2 — AUDIT DELIVERY (Hans-Peter sends manually at 48hrs) ─────────────
+
+def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, registry_id, timestamp_utc=''):
+    """
+    The actual product delivery. Hans-Peter sends this manually within 48 hours.
+    Contains: score, issues, badge embed code, verify URL, SHA-256 hash, soft monitoring close.
+    """
+    try:
+        dt = datetime.strptime(timestamp_utc[:19], '%Y-%m-%dT%H:%M:%S') if timestamp_utc else datetime.now(timezone.utc)
+        display_date = dt.strftime('%B %d, %Y at %H:%M UTC')
+    except Exception:
+        display_date = datetime.now(timezone.utc).strftime('%B %d, %Y at %H:%M UTC')
+
+    score_color  = '#27AE60' if score >= 80 else '#E9A030' if score >= 60 else '#E05252'
+    crits_word   = 'violation' if crits == 1 else 'violations'
+    verify_url   = f'{VERIFY_BASE}/{domain}'
+    cont_link    = f'{STRIPE_CONT_LINK}?client_reference_id={domain}'
+    rid_display  = registry_id or f'IDR-HHS-{domain.upper().replace(".", "-")}'
+    receipt_short = ((receipt_id[:24] + '&hellip;') if receipt_id and len(receipt_id) > 24 else receipt_id) if receipt_id else '—'
+
+    badge_embed = (
+        f'&lt;!-- IDR HHS Compliance Badge — paste into your website footer --&gt;<br>'
+        f'&lt;a href=&quot;{verify_url}&quot; target=&quot;_blank&quot; rel=&quot;noopener&quot;&gt;<br>'
+        f'&nbsp;&nbsp;&lt;img src=&quot;https://idr-backend-production.up.railway.app/api/badge-image/{domain}&quot;<br>'
+        f'&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;alt=&quot;IDR HHS Compliance Verified&quot; width=&quot;52&quot; height=&quot;52&quot;&gt;<br>'
+        f'&lt;/a&gt;'
+    )
+
+    subject = f'Your HHS Readiness Record — {domain} · Audit Complete'
+
+    html = (
+        _hdr('HHS Readiness Record · Delivered') +
+
+        '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:36px 40px 28px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:8px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;color:#8A6F2E;margin-bottom:10px;">Audit Complete — Record Delivered</div>'
+        '<div style="font-family:Georgia,serif;font-size:24px;font-weight:700;color:#0A0E1A;margin-bottom:8px;line-height:1.25;">Your HHS Readiness Record is complete.</div>'
+        '<div style="font-family:Georgia,serif;font-size:14px;font-style:italic;color:#AAAAAA;line-height:1.7;">'
+        f'Everything below is your permanent compliance record for <strong style="color:#333333;">{domain}</strong>. '
+        f'This record is cryptographically sealed, publicly verifiable, and legally defensible under HHS Section 504 and Section 1557.'
+        '</div>'
+        '</td></tr>'
+
+        # Score panel
+        '<tr><td bgcolor="#F2EFE9" style="background-color:#F2EFE9;padding:28px 40px;">'
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<td align="center" style="padding-right:24px;border-right:1px solid #E8E4DC;width:130px;vertical-align:middle;">'
+        f'<div style="font-family:Georgia,serif;font-size:60px;font-weight:700;color:{score_color};line-height:1;">{score}</div>'
+        '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.2em;color:#AAAAAA;text-transform:uppercase;margin-top:4px;">Accessibility Score</div>'
+        '</td>'
+        '<td style="padding-left:28px;vertical-align:middle;">'
+        f'<div style="font-family:Georgia,serif;font-size:36px;font-weight:700;color:#E05252;line-height:1;">{crits}</div>'
+        f'<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.18em;color:#AAAAAA;text-transform:uppercase;margin-top:4px;margin-bottom:14px;">Critical {crits_word}</div>'
+        f'<div style="font-family:Georgia,serif;font-size:13px;font-style:italic;color:#888888;line-height:1.6;">'
+        f'{total} total issues identified and documented in your sealed record.'
+        '</div>'
+        '</td></tr></table>'
+        '</td></tr>'
+
+        # What the human audit confirmed
+        '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:32px 40px 8px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;color:#C9A84C;padding-bottom:14px;border-bottom:1px solid #E8E4DC;margin-bottom:20px;">Human Validation — Five-Point Audit</div>'
+        '</td></tr>'
+        '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:0 40px 32px;">'
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0">'
+        + _feature_row('Keyboard Navigation Test', 'Full site navigation completed using keyboard only. Tab order, focus visibility, and interactive element reachability documented.')
+        + _feature_row('Screen Reader Pass', 'Page content read using assistive technology. Heading structure, landmark navigation, and image descriptions verified.')
+        + _feature_row('Form Completion Test', 'All forms tested for label association, error messaging, and accessible submission flow.')
+        + _feature_row('PDF Accessibility Review', 'Any linked PDF documents reviewed for tagged structure, reading order, and alternative text.')
+        + _feature_row('Visual Stress Testing', 'Page tested at 200% zoom, high contrast mode, and reduced motion settings for WCAG 2.1 AA conformance.')
+        + '</table>'
+        '</td></tr>'
+
+        # Your badges
+        '<tr><td bgcolor="#F2EFE9" style="background-color:#F2EFE9;padding:28px 40px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;color:#AAAAAA;margin-bottom:16px;">Your IDR Badge — On Record Status</div>'
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<td width="80" style="vertical-align:middle;padding-right:20px;">'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 96 96">'
+        '<circle cx="48" cy="48" r="47.5" fill="#0A0E1A"/>'
+        '<circle cx="48" cy="48" r="45.6" fill="none" stroke="#C9A84C" stroke-width="1.5" opacity="0.80"/>'
+        '<circle cx="48" cy="48" r="34.6" fill="none" stroke="#C9A84C" stroke-width="0.65" opacity="0.17"/>'
+        '<text x="48" y="45.3" font-family="Georgia,serif" font-size="27" font-weight="700" fill="#C9A84C" opacity="0.86" text-anchor="middle" dominant-baseline="middle">IDR</text>'
+        '<line x1="22.3" y1="55.3" x2="73.7" y2="55.3" stroke="#8A6F2E" stroke-width="0.75" opacity="0.58"/>'
+        '<text x="48" y="66.8" font-family="Arial,sans-serif" font-size="7.3" font-weight="600" fill="#C9A84C" text-anchor="middle" letter-spacing="0.77" opacity="0.68">ON RECORD</text>'
+        '</svg>'
+        '</td>'
+        '<td style="vertical-align:middle;">'
+        '<div style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#C9A84C;margin-bottom:6px;">ON RECORD Badge — Active</div>'
+        '<div style="font-family:Georgia,serif;font-size:13px;color:#555555;line-height:1.65;margin-bottom:10px;">'
+        'This static gold badge is now live on your public verification page. It signals to any visitor — including auditors and legal counsel — that your organization has an established, documented compliance record.'
+        '</div>'
+        '<div style="font-family:Arial,sans-serif;font-size:10px;color:#AAAAAA;">Your verify page: <a href="' + verify_url + '" style="color:#8A6F2E;">' + verify_url + '</a></div>'
+        '</td></tr></table>'
+        '</td></tr>'
+
+        # Badge embed code
+        '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:28px 40px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.26em;text-transform:uppercase;color:#AAAAAA;margin-bottom:12px;">Embed Your Badge on Your Website</div>'
+        '<div style="font-family:Georgia,serif;font-size:13px;color:#555555;line-height:1.65;margin-bottom:14px;">'
+        'Paste this into your website footer or compliance page. The badge links directly to your public verification record.'
+        '</div>'
+        '<div style="background:#0A0E1A;border:1px solid rgba(201,168,76,0.2);border-radius:3px;padding:16px 18px;font-family:\'Courier New\',Courier,monospace;font-size:10px;color:rgba(201,168,76,0.6);line-height:1.85;">'
+        + badge_embed +
+        '</div>'
+        '<div style="margin-top:10px;font-family:Georgia,serif;font-size:11px;font-style:italic;color:#CCCCCC;">'
+        'Want the pulsing ACTIVE badge instead? That upgrades automatically when you add ongoing monitoring.'
+        '</div>'
+        '</td></tr>'
+
+        # Registry record
+        '<tr><td bgcolor="#F2EFE9" style="background-color:#F2EFE9;padding:28px 40px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.26em;text-transform:uppercase;color:#AAAAAA;margin-bottom:14px;">Your Sealed Registry Record</div>'
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E8E4DC;">'
+        + _receipt_row('Domain', domain)
+        + _receipt_row('Registry ID', rid_display)
+        + _receipt_row('Receipt ID', receipt_short)
+        + _receipt_row('Audit Timestamp', display_date)
+        + _receipt_row('Accessibility Score', f'{score}/100')
+        + _receipt_row('Critical Violations', str(crits))
+        + _receipt_row('Total Issues Documented', str(total))
+        + _receipt_row('Protocol Standard', 'WCAG 2.1 AA · Section 504 / 1557')
+        + _receipt_row('Verification Type', 'Manual Verified — Human Audited')
+        + _receipt_row('Public Verify URL', verify_url)
+        + '</table></td></tr>'
+
+        # Monitoring close — soft, not pushy
+        '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:28px 40px;">'
+        '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E8E4DC;border-left:3px solid #C9A84C;"><tr>'
+        '<td bgcolor="#FDFCF9" style="background-color:#FDFCF9;padding:22px 26px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:#8A6F2E;margin-bottom:10px;">What Your Record Does — and What It Does Not</div>'
+        '<div style="font-family:Georgia,serif;font-size:14px;color:#555555;line-height:1.75;margin-bottom:14px;">'
+        'Your ON RECORD badge documents where your organization stood on the date of this audit. It is a timestamped, sealed record of the accessibility posture at a specific point in time.'
+        '</div>'
+        '<div style="font-family:Georgia,serif;font-size:13.5px;color:#777777;line-height:1.75;margin-bottom:14px;">'
+        'HHS enforcement looks for a pattern — not a moment. Organizations that can show continuous monitoring activity, week after week, are in a fundamentally stronger position than those with a single audit date.'
+        '</div>'
+        '<div style="font-family:Georgia,serif;font-size:13px;font-style:italic;color:#AAAAAA;line-height:1.6;border-left:2px solid #E8E4DC;padding-left:14px;margin-bottom:18px;">'
+        '&ldquo;A static audit can be challenged. A continuously dated record is far harder to dispute.&rdquo;'
+        '</div>'
+        '<a href="' + cont_link + '" style="display:inline-block;padding:12px 26px;background-color:transparent;border:1px solid #C9A84C;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A6F2E;text-decoration:none;">Upgrade to Monitoring Active — $49/month</a>'
+        '<div style="margin-top:10px;font-family:Arial,sans-serif;font-size:9px;color:#CCCCCC;">Your badge upgrades to the pulsing ACTIVE status immediately. Weekly rescans begin the same day.</div>'
+        '</td></tr></table>'
+        '</td></tr>'
+
+        # Signature
+        '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:24px 40px 36px;border-top:1px solid #F0EDE8;">'
+        '<div style="font-family:Georgia,serif;font-size:14px;color:#555555;line-height:1.8;">'
+        'Your record is sealed and live. If you have any questions about what was found, what it means, or how to address specific issues — reply directly to this email.<br><br>'
+        'Hans-Peter Nkansah<br>'
+        '<span style="font-family:Arial,sans-serif;font-size:11px;color:#AAAAAA;">Founder, Institute of Digital Remediation</span><br>'
+        '<span style="font-family:Arial,sans-serif;font-size:11px;color:#AAAAAA;">idrshield.com &nbsp;·&nbsp; hello@idrshield.com</span>'
+        '</div>'
+        '</td></tr>'
+
+        + _ftr(domain, rid_display)
+    )
+
+    return _send(email, subject, html)
+
+
+# ── PAYMENT NOTIFICATION TO HANS-PETER ───────────────────────────────────────
+
+def send_payment_notification(domain, email, amount, product_type):
+    """
+    Fires internally to idrshieldhq@gmail.com every time a payment lands.
+    Tells Hans-Peter to deliver the audit within 48 hours.
+    """
+    NOTIFY_EMAIL = 'idrshieldhq@gmail.com'
+    verify_url   = f'{VERIFY_BASE}/{domain}'
+    product_label = '$497 HHS Readiness Audit' if product_type == 'audit' else '$49/month Monitoring'
+
+    subject = f'[NEW PAYMENT] {domain} — {product_label}'
+
+    html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8"></head>'
+        '<body style="font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:30px 16px;">'
+        '<div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e0e0e0;">'
+        '<div style="background:#0A0E1A;padding:22px 28px;border-bottom:3px solid #C9A84C;">'
+        '<p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin:0 0 4px;">IDR Shield — Payment Alert</p>'
+        f'<h1 style="font-size:18px;font-weight:normal;color:#FAF7F2;margin:0;">{product_label} Received</h1>'
+        '</div>'
+        '<div style="padding:24px 28px;">'
+        f'<table style="width:100%;border-collapse:collapse;font-size:13px;">'
+        f'<tr><td style="padding:7px 0;color:#999;width:120px;">Domain</td><td style="padding:7px 0;color:#333;font-weight:700;">{domain}</td></tr>'
+        f'<tr><td style="padding:7px 0;color:#999;">Customer</td><td style="padding:7px 0;color:#333;">{email}</td></tr>'
+        f'<tr><td style="padding:7px 0;color:#999;">Product</td><td style="padding:7px 0;color:#C9A84C;font-weight:700;">{product_label}</td></tr>'
+        f'<tr><td style="padding:7px 0;color:#999;">Verify URL</td><td style="padding:7px 0;"><a href="{verify_url}" style="color:#8A6F2E;">{verify_url}</a></td></tr>'
+        '</table>'
+        '</div>'
+        + (
+            '<div style="background:#FDF8F0;border-top:1px solid #F0E8D8;border-bottom:1px solid #F0E8D8;padding:18px 28px;">'
+            '<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:#C9A84C;margin:0 0 6px;letter-spacing:0.1em;text-transform:uppercase;">Action Required — 48 Hour Delivery</p>'
+            '<p style="font-family:Georgia,serif;font-size:13px;color:#555;line-height:1.6;margin:0;">'
+            f'Run the scanner on <strong>{domain}</strong>, review the results, then send the audit delivery email using <code>send_hhs_audit_delivery()</code>.'
+            '</p>'
+            '</div>'
+            if product_type == 'audit' else
+            '<div style="background:#F0FDF4;border-top:1px solid #D1FAE5;border-bottom:1px solid #D1FAE5;padding:18px 28px;">'
+            '<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:#27AE60;margin:0 0 6px;letter-spacing:0.1em;text-transform:uppercase;">Monitoring Activated — No Action Required</p>'
+            '<p style="font-family:Georgia,serif;font-size:13px;color:#555;line-height:1.6;margin:0;">Weekly rescans will begin automatically. Registry status upgraded to Monitoring Active.</p>'
+            '</div>'
+        ) +
+        '<div style="padding:16px 28px;">'
+        '<p style="font-family:Arial,sans-serif;font-size:10px;color:#CCCCCC;margin:0;">IDR Shield · Automated payment alert · Do not reply</p>'
+        '</div>'
+        '</div>'
+        '</body></html>'
+    )
+
+    return _send(NOTIFY_EMAIL, subject, html)
