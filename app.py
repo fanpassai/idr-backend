@@ -1188,8 +1188,8 @@ def stripe_hhs_webhook():
     if not domain:
         custom_fields = getattr(session, 'custom_fields', []) or []
         for field in custom_fields:
-            label = getattr(field, 'label', '') or ''
-            if label.lower().strip() == 'website domain':
+label_obj = getattr(field, 'label', None)
+            label = getattr(label_obj, 'custom', None) or getattr(label_obj, 'value', None) or str(label_obj) if label_obj else ''            if label.lower().strip() == 'website domain':
                 text_obj = getattr(field, 'text', None)
                 domain = getattr(text_obj, 'value', None)
                 break
