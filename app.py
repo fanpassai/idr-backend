@@ -1186,13 +1186,20 @@ def stripe_hhs_webhook():
     session = event['data']['object']
     domain = getattr(session, 'client_reference_id', None)
     if not domain:
-        custom_fields = getattr(session, 'custom_fields', []) or []
-        for field in custom_fields:
-            label = getattr(field, 'label', '') or ''
-            if label.lower().strip() == 'website domain':
-                text_obj = getattr(field, 'text', None)
-                domain = getattr(text_obj, 'value', None)
-                break
+        try:
+            custom_fields = getattr(session, 'custom_fields', []) or []
+            for field in custom_fields:
+                try:
+                    label = str(getattr(field, 'label', '') or '')
+                    if 'website' in label.lower() or 'domain' in label.lower():
+                        text_obj = getattr(field, 'text', None)
+                        domain = getattr(text_obj, 'value', None)
+                        if domain:
+                            break
+                except Exception:
+                    continue
+        except Exception:
+            pass
     if not domain:
         return jsonify({'received': True, 'action': 'no_domain'}), 200
     domain = domain.strip().lower().replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
