@@ -1421,9 +1421,16 @@ def stripe_hhs_webhook():
             elif is_monitoring:
                 cur.execute("""
                     INSERT INTO registry
-                        (domain, status, hhs_enrolled, activated_by, created_at, updated_at)
+                        cur.execute("""
+                    INSERT INTO registry
+                        (domain, registry_id, status, hhs_enrolled, activated_by, created_at, updated_at)
                     VALUES
-                        (%s, 'active', TRUE, %s, NOW(), NOW())
+                        (%s, %s, 'active', TRUE, %s, NOW(), NOW())
+                    ON CONFLICT (domain) DO UPDATE SET
+                        status       = 'active',
+                        hhs_enrolled = TRUE,
+                        updated_at   = NOW()
+                """, (domain, f'IDR-HHS-{domain.upper().replace(".", "-")}', email))
                     ON CONFLICT (domain) DO UPDATE SET
                         status       = 'active',
                         hhs_enrolled = TRUE,
