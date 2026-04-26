@@ -1343,11 +1343,11 @@ def stripe_hhs_webhook():
     if event['type'] != 'checkout.session.completed':
         return jsonify({'received': True, 'action': 'ignored'}), 200
 
-    session = event['data']['object']
+    import json as _json
+    session = _json.loads(payload.decode('utf-8'))['data']['object']
 
     # Try client_reference_id first
     domain = session.get('client_reference_id') or None
-
     # Fall back to custom field "Website Domain"
     if not domain:
         try:
