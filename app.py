@@ -1184,7 +1184,8 @@ def stripe_hhs_webhook():
     if event['type'] != 'checkout.session.completed':
         return jsonify({'received': True, 'action': 'ignored'}), 200
     session = event['data']['object']
-    domain = getattr(session, 'client_reference_id', None)
+
+domain = getattr(session, 'client_reference_id', None)
 
 if not domain:
     custom_fields = getattr(session, 'custom_fields', []) or []
@@ -1198,14 +1199,17 @@ if not domain:
 if not domain:
     return jsonify({'received': True, 'action': 'no_domain'}), 200
 
-domain = domain.strip().lower().replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
-    
-    amount = getattr(session, 'amount_total', 0)
+domain = domain.strip().lower()
+domain = domain.replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
+
+amount = getattr(session, 'amount_total', 0)
 customer_details = getattr(session, 'customer_details', None)
 email = getattr(customer_details, 'email', '') if customer_details else ''
-    is_audit = (amount == 49700)
-    is_monitoring = (amount == 4900)
-    print(f'[HHS WEBHOOK] domain={domain} email={email} amount={amount}')
+
+is_audit = (amount == 49700)
+is_monitoring = (amount == 4900)
+
+print(f'[HHS WEBHOOK] domain={domain} email={email} amount={amount}')
     if not db_available:
         return jsonify({'received': True, 'action': 'db_unavailable'}), 200
     conn = get_conn()
