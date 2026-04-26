@@ -1184,8 +1184,21 @@ def stripe_hhs_webhook():
     if event['type'] != 'checkout.session.completed':
         return jsonify({'received': True, 'action': 'ignored'}), 200
     session = event['data']['object']
-    domain = (session.get('client_reference_id') or '').strip().lower()
-    domain = domain.replace('https://', '').replace('http://', '').split('/')[0]
+    domain = getattr(session, 'client_reference_id', None)
+
+if not domain:
+    custom_fields = getattr(session, 'custom_fields', []) or []
+    for field in custom_fields:
+        label = getattr(field, 'label', '') or ''
+        if label.lower().strip() == 'website domain':
+            text_obj = getattr(field, 'text', None)
+            domain = getattr(text_obj, 'value', None)
+            break
+
+if not domain:
+    return jsonify({'received': True, 'action': 'no_domain'}), 200
+
+domain = domain.strip().lower().replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
     if not domain:
         return jsonify({'received': True, 'action': 'no_domain'}), 200
     amount = session.get('amount_total', 0)
