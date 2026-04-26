@@ -1199,10 +1199,10 @@ if not domain:
     return jsonify({'received': True, 'action': 'no_domain'}), 200
 
 domain = domain.strip().lower().replace('https://', '').replace('http://', '').replace('www.', '').split('/')[0]
-    if not domain:
-        return jsonify({'received': True, 'action': 'no_domain'}), 200
-    amount = session.get('amount_total', 0)
-    email = session.get('customer_details', {}).get('email', '')
+    
+    amount = getattr(session, 'amount_total', 0)
+customer_details = getattr(session, 'customer_details', None)
+email = getattr(customer_details, 'email', '') if customer_details else ''
     is_audit = (amount == 49700)
     is_monitoring = (amount == 4900)
     print(f'[HHS WEBHOOK] domain={domain} email={email} amount={amount}')
