@@ -1393,15 +1393,15 @@ def stripe_hhs_webhook():
             if is_audit:
                 cur.execute("""
                     INSERT INTO registry
-                        (domain, status, hhs_enrolled, activated_by, created_at, updated_at)
+                        (domain, registry_id, status, hhs_enrolled, activated_by, created_at, updated_at)
                     VALUES
-                        (%s, 'manual_verified', TRUE, %s, NOW(), NOW())
+                        (%s, %s, 'manual_verified', TRUE, %s, NOW(), NOW())
                     ON CONFLICT (domain) DO UPDATE SET
                         status       = 'manual_verified',
                         hhs_enrolled = TRUE,
                         activated_by = COALESCE(registry.activated_by, EXCLUDED.activated_by),
                         updated_at   = NOW()
-                """, (domain, email))
+                """, (domain, f'IDR-HHS-{domain.upper().replace(".", "-")}', email))
                 conn.commit()
                 log_evidence(domain, 'STRIPE-HHS-AUDIT', 'HHS_AUDIT_PAYMENT',
                              f'$497 audit payment from {email}')
