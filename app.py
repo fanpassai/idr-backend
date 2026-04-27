@@ -1521,6 +1521,156 @@ def stripe_hhs_webhook():
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+# ── HHS Manual Audit Delivery ─────────────────────────────────────────────────
+# Add this block to app.py, just before the "Entry point" section at the bottom
+# (before the "if __name__ == '__main__':" line)
+
+@app.route('/api/hhs/manual-deliver', methods=['POST', 'OPTIONS'])
+def hhs_manual_deliver():
+    """
+    Hans-Peter's admin endpoint — receives completed manual audit form,
+    generates the 30-page PDF, and delivers it to the client.
+    Called from hhs_audit_delivery.html.
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    try:
+        body = request.get_json(silent=True)
+        if not body:
+            return _error('Request body required.', 400)
+
+        # ── Admin key check ───────────────────────────────────────────────────
+        if body.get('admin_key', '') != ADMIN_KEY:
+            return _error('Unauthorized', 401)
+
+        # ── Required fields ───────────────────────────────────────────────────
+        client_email  = body.get('client_email', '').strip()
+        domain        = body.get('domain', '').strip().lower()
+        receipt_id    = body.get('receipt_id', '').strip()
+        registry_id   = body.get('registry_id', '').strip()
+        timestamp_utc = body.get('timestamp_utc', '')
+        organization  = body.get('organization', {})
+        scan_data     = body.get('scan', {})
+        manual_checks = body.get('manual_checks', {})
+
+        if not client_email or '@' not in client_email:
+            return _error('Valid client_email required.', 400)
+        if not domain:
+            return _error('domain required.', 400)
+        if not receipt_id:
+            return _error('receipt_id required.', 400)
+
+        # ── Normalize domain ──────────────────────────────────────────────────
+        domain = domain.replace('https://','').replace('http://','').replace('www.','').split('/')[0]
+
+        # ── Auto-fill registry_id if missing ─────────────────────────────────
+        if not registry_id:
+            registry_id = f'IDR-HHS-{domain.upper().replace(".", "-")}'
+
+        # ── Timestamp ─────────────────────────────────────────────────────────
+        if not timestamp_utc:
+            timestamp_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+        # ── Inject manual check notes into category descriptions ──────────────
+        # Map Hans-Peter's text notes onto the matching category issues
+        check_map = {
+            'Image Alt Text':     manual_checks.get('screen_reader', ''),
+            'Form Labels':        manual_checks.get('form', ''),
+            'Keyboard Navigation':manual_checks.get('keyboard', ''),
+            'Heading Structure':  manual_checks.get('screen_reader', ''),
+            'ARIA & Links':       manual_checks.get('screen_reader', ''),
+        }
+
+        # Store manual check notes on scan_data so the PDF can use them
+        scan_data['manual_checks'] = manual_checks
+        scan_data['domain']        = scan_data.get('domain', domain)
+
+        # ── Build receipt_data for PDF generator ──────────────────────────────
+        import hashlib, json as _json
+        payload_str = _json.dumps({
+            'receipt_id':  receipt_id,
+            'registry_id': registry_id,
+            'timestamp':   timestamp_utc,
+            'domain':      domain,
+            'scan':        scan_data,
+        }, sort_keys=True)
+        doc_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+
+        receipt_data = {
+            'receipt_id':    receipt_id,
+            'registry_id':   registry_id,
+            'timestamp_utc': timestamp_utc,
+            'hash':          doc_hash,
+            'activated_by':  client_email,
+            'organization':  organization,
+            'scan':          scan_data,
+        }
+
+        # ── Generate PDF ───────────────────────────────────────────────────────
+        from receipt.hhs_pdf_generator import generate_hhs_pdf
+        pdf_bytes = generate_hhs_pdf(receipt_data)
+        print(f'[HHS_DELIVER] PDF generated — {len(pdf_bytes):,} bytes for {domain}')
+
+        # ── Send delivery email with PDF attached ─────────────────────────────
+        from hhs_emailer import send_hhs_audit_delivery
+        score   = scan_data.get('overall_score', 0)
+        crits   = scan_data.get('critical_count', 0)
+        total   = scan_data.get('total_issues', 0)
+        serious = scan_data.get('serious_count', 0)
+
+        sent = send_hhs_audit_delivery(
+            email         = client_email,
+            domain        = domain,
+            score         = score,
+            crits         = crits,
+            total         = total,
+            receipt_id    = receipt_id,
+            registry_id   = registry_id,
+            timestamp_utc = timestamp_utc,
+            organization  = organization,
+            scan_data     = scan_data,
+        )
+
+        # ── Log to evidence ───────────────────────────────────────────────────
+        if db_available:
+            log_evidence(
+                domain, receipt_id,
+                'HHS_AUDIT_DELIVERED',
+                f'Manual audit delivered to {client_email} by Hans-Peter. '
+                f'Score: {score}/100, Critical: {crits}, Total: {total}'
+            )
+            # Update registry status to manual_verified + store score
+            conn = get_conn()
+            if conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE registry SET
+                                status       = 'manual_verified',
+                                latest_score = %s,
+                                critical_count = %s,
+                                last_scanned = NOW(),
+                                updated_at   = NOW()
+                            WHERE domain = %s
+                        """, (score, crits, domain))
+                finally:
+                    conn.close()
+
+        print(f'[HHS_DELIVER] Delivered to {client_email} | sent={sent}')
+
+        return jsonify({
+            'success':    True,
+            'domain':     domain,
+            'receipt_id': receipt_id,
+            'email_sent': sent,
+            'pdf_bytes':  len(pdf_bytes),
+            'score':      score,
+        }), 200
+
+    except Exception as e:
+        print(f'[HHS_DELIVER] Error: {traceback.format_exc()}')
+        return _error(f'Delivery failed: {str(e)}', 500)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
