@@ -763,9 +763,15 @@ def send_payment_notification(domain, email, amount, product_type):
         + (
             '<div style="background:#FDF8F0;border-top:1px solid #F0E8D8;border-bottom:1px solid #F0E8D8;padding:18px 28px;">'
             '<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:#C9A84C;margin:0 0 6px;letter-spacing:0.1em;text-transform:uppercase;">Action Required — 48 Hour Delivery</p>'
-            '<p style="font-family:Georgia,serif;font-size:13px;color:#555;line-height:1.6;margin:0;">'
-            f'Run the scanner on <strong>{domain}</strong>, review the results, then send the audit delivery email using <code>send_hhs_audit_delivery()</code>.'
+            '<p style="font-family:Georgia,serif;font-size:13px;color:#555;line-height:1.6;margin:0 0 14px;">'
+            f'Audit the site, complete your manual checks, then deliver using the link below.'
             '</p>'
+            f'<a href="https://idrshield.com/hhs-audit-delivery.html?domain={domain}&email={email}" '
+            'style="display:inline-block;padding:11px 24px;background:#C9A84C;'
+            'font-family:Arial,sans-serif;font-size:10px;font-weight:700;'
+            'letter-spacing:0.16em;text-transform:uppercase;color:#0A0E1A;text-decoration:none;">'
+            f'Open Delivery Console → {domain}'
+            '</a>'
             '</div>'
             if product_type == 'audit' else
             '<div style="background:#F0FDF4;border-top:1px solid #D1FAE5;border-bottom:1px solid #D1FAE5;padding:18px 28px;">'
