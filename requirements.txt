@@ -10,3 +10,5 @@ sendgrid
 stripe
 flask-limiter
 sentry-sdk[flask]
+reportlab
+qrcode[pil]
