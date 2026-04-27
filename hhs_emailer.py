@@ -4,7 +4,9 @@ HHS Healthcare Email Sequence
 """
 
 import os
+import base64
 from datetime import datetime, timezone, timedelta
+from hhs_pdf_generator import generate_hhs_pdf
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL       = 'hello@idrshield.com'
@@ -13,13 +15,13 @@ STRIPE_CONT_LINK = os.environ.get('STRIPE_CONT_LINK', 'https://buy.stripe.com/RE
 VERIFY_BASE      = 'https://idrshield.com/hhs-verify'
 
 
-def _send(to_email, subject, html, text=''):
+def _send(to_email, subject, html, text='', attachments=None):
     if not SENDGRID_API_KEY:
         print(f'[HHS_EMAIL] No SENDGRID_API_KEY — skipping: {subject}')
         return False
     try:
         import sendgrid
-        from sendgrid.helpers.mail import Mail
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
         message = Mail(
             from_email=(FROM_EMAIL, FROM_NAME),
             to_emails=to_email,
@@ -27,6 +29,14 @@ def _send(to_email, subject, html, text=''):
             html_content=html,
             plain_text_content=text or _strip_html(html)
         )
+        if attachments:
+            for att in attachments:
+                a = Attachment()
+                a.file_content = FileContent(att['content'])
+                a.file_name    = FileName(att['filename'])
+                a.file_type    = FileType(att['type'])
+                a.disposition  = Disposition(att.get('disposition', 'attachment'))
+                message.add_attachment(a)
         sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_API_KEY)
         r  = sg.client.mail.send.post(request_body=message.get())
         print(f'[HHS_EMAIL] Sent "{subject}" to {to_email} — {r.status_code}')
@@ -501,12 +511,21 @@ def _compare_row(text):
     )
 
 
-# ── EMAIL 2 — AUDIT DELIVERY (Hans-Peter sends manually at 48hrs) ─────────────
+# ── AUDIT DELIVERY — with PDF attachment ──────────────────────────────────────
 
-def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, registry_id, timestamp_utc=''):
+def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id,
+                             registry_id, timestamp_utc='', organization=None,
+                             scan_data=None):
     """
-    The actual product delivery. Hans-Peter sends this manually within 48 hours.
-    Contains: score, issues, badge embed code, verify URL, SHA-256 hash, soft monitoring close.
+    The actual product delivery. Sends the 30-page PDF audit report as an attachment.
+    Hans-Peter triggers this manually within 48 hours of payment, or it fires
+    automatically from the webhook when scan_data is available.
+
+    New args vs original:
+        organization : dict  — {name, address, contact_name, phone, email}
+                               Falls back to domain if not provided.
+        scan_data    : dict  — full scan dict to build the PDF. If None,
+                               a minimal receipt is built from the flat args.
     """
     try:
         dt = datetime.strptime(timestamp_utc[:19], '%Y-%m-%dT%H:%M:%S') if timestamp_utc else datetime.now(timezone.utc)
@@ -520,6 +539,50 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
     cont_link    = f'{STRIPE_CONT_LINK}?client_reference_id={domain}'
     rid_display  = registry_id or f'IDR-HHS-{domain.upper().replace(".", "-")}'
     receipt_short = ((receipt_id[:24] + '&hellip;') if receipt_id and len(receipt_id) > 24 else receipt_id) if receipt_id else '—'
+
+    # ── Build and attach the PDF ───────────────────────────────────────────────
+    pdf_attachment = None
+    try:
+        # Build receipt_data for the PDF generator
+        org = organization or {'name': domain}
+
+        # Use provided scan_data or build a minimal scan from flat args
+        if scan_data:
+            scan = scan_data
+        else:
+            scan = {
+                'domain':          domain,
+                'url':             f'https://{domain}',
+                'title':           '',
+                'overall_score':   score,
+                'overall_status':  'pass' if score >= 80 else 'warning' if score >= 60 else 'fail',
+                'critical_count':  crits,
+                'serious_count':   0,
+                'total_issues':    total,
+                'scan_duration_ms': 0,
+                'categories':      [],
+            }
+
+        receipt_data = {
+            'receipt_id':    receipt_id or '',
+            'registry_id':   rid_display,
+            'timestamp_utc': timestamp_utc or datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'hash':          '',
+            'activated_by':  email,
+            'organization':  org,
+            'scan':          scan,
+        }
+
+        pdf_bytes = generate_hhs_pdf(receipt_data)
+        pdf_attachment = {
+            'content':     base64.b64encode(pdf_bytes).decode(),
+            'type':        'application/pdf',
+            'filename':    f'IDR-HHS-AuditRecord-{domain}-{(receipt_id or "")[:8]}.pdf',
+            'disposition': 'attachment',
+        }
+        print(f'[HHS_EMAIL] PDF generated — {len(pdf_bytes):,} bytes')
+    except Exception as e:
+        print(f'[HHS_EMAIL] PDF generation failed (email still sends): {e}')
 
     badge_embed = (
         f'&lt;!-- IDR HHS Compliance Badge — paste into your website footer --&gt;<br>'
@@ -539,8 +602,21 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
         '<div style="font-family:Georgia,serif;font-size:24px;font-weight:700;color:#0A0E1A;margin-bottom:8px;line-height:1.25;">Your HHS Readiness Record is complete.</div>'
         '<div style="font-family:Georgia,serif;font-size:14px;font-style:italic;color:#AAAAAA;line-height:1.7;">'
         f'Everything below is your permanent compliance record for <strong style="color:#333333;">{domain}</strong>. '
-        f'This record is cryptographically sealed, publicly verifiable, and legally defensible under HHS Section 504 and Section 1557.'
+        f'The full 30-page audit report is attached to this email as a PDF.'
         '</div>'
+        '</td></tr>'
+
+        # PDF attached notice
+        '<tr><td bgcolor="#0A0E1A" style="background-color:#0A0E1A;padding:18px 40px;">'
+        '<table cellpadding="0" cellspacing="0" border="0"><tr>'
+        '<td width="28" style="vertical-align:middle;padding-right:12px;">'
+        '<div style="font-size:20px;">📄</div>'
+        '</td>'
+        '<td style="vertical-align:middle;">'
+        '<div style="font-family:Arial,sans-serif;font-size:8px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:rgba(201,168,76,0.6);margin-bottom:3px;">Attached to this email</div>'
+        f'<div style="font-family:\'Courier New\',Courier,monospace;font-size:11px;color:#C9A84C;">IDR-HHS-AuditRecord-{domain}-{(receipt_id or "")[:8]}.pdf</div>'
+        '<div style="font-family:Arial,sans-serif;font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px;">30-page court-ready audit record · Cryptographically sealed</div>'
+        '</td></tr></table>'
         '</td></tr>'
 
         # Score panel
@@ -559,7 +635,7 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
         '</td></tr></table>'
         '</td></tr>'
 
-        # What the human audit confirmed
+        # Human validation
         '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:32px 40px 8px;">'
         '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;color:#C9A84C;padding-bottom:14px;border-bottom:1px solid #E8E4DC;margin-bottom:20px;">Human Validation — Five-Point Audit</div>'
         '</td></tr>'
@@ -573,7 +649,7 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
         + '</table>'
         '</td></tr>'
 
-        # Your badges
+        # Badge
         '<tr><td bgcolor="#F2EFE9" style="background-color:#F2EFE9;padding:28px 40px;">'
         '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.28em;text-transform:uppercase;color:#AAAAAA;margin-bottom:16px;">Your IDR Badge — On Record Status</div>'
         '<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>'
@@ -596,17 +672,14 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
         '</td></tr></table>'
         '</td></tr>'
 
-        # Badge embed code
+        # Badge embed
         '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:28px 40px;">'
         '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.26em;text-transform:uppercase;color:#AAAAAA;margin-bottom:12px;">Embed Your Badge on Your Website</div>'
         '<div style="font-family:Georgia,serif;font-size:13px;color:#555555;line-height:1.65;margin-bottom:14px;">'
-        'Paste this into your website footer or compliance page. The badge links directly to your public verification record.'
+        'Paste this into your website footer or compliance page.'
         '</div>'
         '<div style="background:#0A0E1A;border:1px solid rgba(201,168,76,0.2);border-radius:3px;padding:16px 18px;font-family:\'Courier New\',Courier,monospace;font-size:10px;color:rgba(201,168,76,0.6);line-height:1.85;">'
         + badge_embed +
-        '</div>'
-        '<div style="margin-top:10px;font-family:Georgia,serif;font-size:11px;font-style:italic;color:#CCCCCC;">'
-        'Want the pulsing ACTIVE badge instead? That upgrades automatically when you add ongoing monitoring.'
         '</div>'
         '</td></tr>'
 
@@ -626,29 +699,26 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
         + _receipt_row('Public Verify URL', verify_url)
         + '</table></td></tr>'
 
-        # Monitoring close — soft, not pushy
+        # Monitoring close
         '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:28px 40px;">'
         '<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #E8E4DC;border-left:3px solid #C9A84C;"><tr>'
         '<td bgcolor="#FDFCF9" style="background-color:#FDFCF9;padding:22px 26px;">'
         '<div style="font-family:Arial,sans-serif;font-size:7.5px;font-weight:700;letter-spacing:0.22em;text-transform:uppercase;color:#8A6F2E;margin-bottom:10px;">What Your Record Does — and What It Does Not</div>'
         '<div style="font-family:Georgia,serif;font-size:14px;color:#555555;line-height:1.75;margin-bottom:14px;">'
-        'Your ON RECORD badge documents where your organization stood on the date of this audit. It is a timestamped, sealed record of the accessibility posture at a specific point in time.'
-        '</div>'
-        '<div style="font-family:Georgia,serif;font-size:13.5px;color:#777777;line-height:1.75;margin-bottom:14px;">'
-        'HHS enforcement looks for a pattern — not a moment. Organizations that can show continuous monitoring activity, week after week, are in a fundamentally stronger position than those with a single audit date.'
+        'Your ON RECORD badge documents where your organization stood on the date of this audit. '
+        'HHS enforcement looks for a pattern — not a moment.'
         '</div>'
         '<div style="font-family:Georgia,serif;font-size:13px;font-style:italic;color:#AAAAAA;line-height:1.6;border-left:2px solid #E8E4DC;padding-left:14px;margin-bottom:18px;">'
         '&ldquo;A static audit can be challenged. A continuously dated record is far harder to dispute.&rdquo;'
         '</div>'
         '<a href="' + cont_link + '" style="display:inline-block;padding:12px 26px;background-color:transparent;border:1px solid #C9A84C;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A6F2E;text-decoration:none;">Upgrade to Monitoring Active — $49/month</a>'
-        '<div style="margin-top:10px;font-family:Arial,sans-serif;font-size:9px;color:#CCCCCC;">Your badge upgrades to the pulsing ACTIVE status immediately. Weekly rescans begin the same day.</div>'
         '</td></tr></table>'
         '</td></tr>'
 
         # Signature
         '<tr><td bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:24px 40px 36px;border-top:1px solid #F0EDE8;">'
         '<div style="font-family:Georgia,serif;font-size:14px;color:#555555;line-height:1.8;">'
-        'Your record is sealed and live. If you have any questions about what was found, what it means, or how to address specific issues — reply directly to this email.<br><br>'
+        'Your full audit report is attached. If you have any questions about the findings, reply directly to this email.<br><br>'
         'Hans-Peter Nkansah<br>'
         '<span style="font-family:Arial,sans-serif;font-size:11px;color:#AAAAAA;">Founder, Institute of Digital Remediation</span><br>'
         '<span style="font-family:Arial,sans-serif;font-size:11px;color:#AAAAAA;">idrshield.com &nbsp;·&nbsp; hello@idrshield.com</span>'
@@ -658,7 +728,8 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
         + _ftr(domain, rid_display)
     )
 
-    return _send(email, subject, html)
+    attachments = [pdf_attachment] if pdf_attachment else None
+    return _send(email, subject, html, attachments=attachments)
 
 
 # ── PAYMENT NOTIFICATION TO HANS-PETER ───────────────────────────────────────
@@ -666,7 +737,6 @@ def send_hhs_audit_delivery(email, domain, score, crits, total, receipt_id, regi
 def send_payment_notification(domain, email, amount, product_type):
     """
     Fires internally to idrshieldhq@gmail.com every time a payment lands.
-    Tells Hans-Peter to deliver the audit within 48 hours.
     """
     NOTIFY_EMAIL = 'idrshieldhq@gmail.com'
     verify_url   = f'{VERIFY_BASE}/{domain}'
