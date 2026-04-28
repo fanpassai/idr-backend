@@ -6,7 +6,7 @@ HHS Healthcare Email Sequence
 import os
 import base64
 from datetime import datetime, timezone, timedelta
-from hhs_pdf_generator import generate_hhs_pdf
+from receipt.hhs_pdf_generator import generate_hhs_pdf
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL       = 'hello@idrshield.com'
