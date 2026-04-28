@@ -11,3 +11,4 @@ stripe
 flask-limiter
 sentry-sdk[flask]
 qrcode[pil]
+pypdf
