@@ -1521,7 +1521,9 @@ def stripe_hhs_webhook():
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-
+# ── HHS Manual Audit Delivery ─────────────────────────────────────────────────
+# Add this block to app.py, just before the "Entry point" section at the bottom
+# (before the "if __name__ == '__main__':" line)
 
 @app.route('/api/hhs/manual-deliver', methods=['POST', 'OPTIONS'])
 def hhs_manual_deliver():
@@ -1669,18 +1671,7 @@ def hhs_manual_deliver():
     except Exception as e:
         print(f'[HHS_DELIVER] Error: {traceback.format_exc()}')
         return _error(f'Delivery failed: {str(e)}', 500)
-... end of hhs_manual_deliver function ...
 
-@app.route('/api/hhs/capture', ...)       ← NEW
-def hhs_capture(): ...                    ← NEW
-
-@app.route('/api/hhs/org-data/...', ...)  ← NEW
-def hhs_org_data(): ...                   ← NEW
-
-# ── Entry point ──────────────────────────
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5050))
-    app.run(host='0.0.0.0', port=port, debug=False)
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
     app.run(host='0.0.0.0', port=port, debug=False)
