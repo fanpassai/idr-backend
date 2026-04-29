@@ -440,6 +440,7 @@ def _cover(r, St, verify_url):
         ('RECORD DATE',f'{date_str}  ·  {time_str}'),
         ('RECEIPT ID',rid),
         ('STANDARD','WCAG 2.1 Level AA  ·  Section 504  ·  Section 1557 ACA'),
+        ('SCOPE','Primary Web Presence — Main public-facing website and directly linked informational pages. Patient portals, scheduling systems, intake forms, mobile applications, and third-party tools are outside this engagement unless explicitly included in a Full Patient Access Audit.'),
         ('SHA-256',dhash[:36]+'…'),
         ('PREPARED FOR',org_name),
     ],c1=1.75*inch,dark=True))
