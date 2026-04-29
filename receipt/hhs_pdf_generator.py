@@ -2412,6 +2412,7 @@ def generate_hhs_pdf(receipt_data: dict) -> bytes:
     def _build_story(r):
         s=[]
         s += _cover(r,St,verify_url)
+        s += _record_declaration(r,St)
         s += _toc(St)
         s += _exec_summary(r,St)
         s += _certification(r,St)
