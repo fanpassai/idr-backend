@@ -463,6 +463,159 @@ def _cover(r, St, verify_url):
     return st
 
 
+def _record_declaration(r, St):
+    scan=r.get('scan',{}); domain=scan.get('domain','')
+    score=scan.get('overall_score',0)
+    org=r.get('organization',{}); org_name=org.get('name',domain)
+    reg_id=r.get('registry_id','')
+    ts=r.get('timestamp_utc',''); date_str,time_str=_dt(ts)
+    Cw=W(); sc=_sc(score)
+    st=[]
+    st.append(Paragraph('RECORD INITIATION & COMPLIANCE POSITION',St['ey']))
+    st.append(GoldRule())
+    st.append(Spacer(1,0.08*inch))
+    st.append(Paragraph('Record Declaration',St['h1']))
+    st.append(Spacer(1,0.06*inch))
+    st.append(KV([
+        ('RECORD INITIATED', f'{date_str}  ·  {time_str}'),
+        ('REGISTRY ENTRY', reg_id),
+        ('RECORD TYPE', 'Automated WCAG 2.1 AA Protocol Scan + CPACC Human Validation'),
+        ('STATUS', 'ACTIVE RECORD — BASELINE ESTABLISHED'),
+    ], c1=1.9*inch, dark=True))
+    st.append(Spacer(1,0.16*inch))
+    st.append(Paragraph('What This Document Establishes',St['h3']))
+    confirms=[
+        'A formal accessibility audit has been conducted under WCAG 2.1 Level AA protocol.',
+        'Accessibility violations have been identified, categorized by severity, and documented with evidence.',
+        'A prioritized remediation roadmap has been issued to the organization.',
+        'A timestamped, cryptographically sealed compliance record now exists in the IDR HHS Registry.',
+        'This organization has initiated measurable, documented compliance activity.',
+    ]
+    for item in confirms:
+        row=Table([[
+            Paragraph('✓',ParagraphStyle('ck',fontName='Helvetica-Bold',fontSize=11,
+                                          textColor=GREEN_PASS,leading=14,alignment=TA_CENTER)),
+            Paragraph(item,ParagraphStyle('ci2',fontName='Times-Roman',fontSize=9.5,
+                                          textColor=CHARCOAL,leading=14)),
+        ]],colWidths=[0.28*inch,Cw-0.28*inch])
+        row.setStyle(TableStyle([
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
+            ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
+            ('LEFTPADDING',(0,0),(-1,-1),8),
+            ('LINEBELOW',(0,0),(-1,-1),0.3,CREAM_DARK),
+            ('BACKGROUND',(0,0),(-1,-1),CREAM),
+        ]))
+        st.append(row)
+    st.append(Spacer(1,0.14*inch))
+    matters_box=Table([[Paragraph(
+        '<b>Why This Record Matters</b><br/><br/>'
+        'This Good Faith Effort Record creates a documented point-in-time baseline of '
+        'accessibility posture. In the context of HHS enforcement under Section 504 and '
+        'Section 1557:<br/><br/>'
+        'Organizations with no record appear non-compliant and inactive.<br/>'
+        'Organizations with a record demonstrate measurable awareness and documented action.<br/><br/>'
+        '<b>This document does not certify compliance. It establishes something more '
+        'critical: proof that compliance activity has been initiated and documented.</b>',
+        ParagraphStyle('mb',fontName='Times-Roman',fontSize=9.5,
+                       textColor=NAVY,leading=15))
+    ]],colWidths=[Cw])
+    matters_box.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,-1),CREAM_MID),
+        ('TOPPADDING',(0,0),(-1,-1),16),('BOTTOMPADDING',(0,0),(-1,-1),16),
+        ('LEFTPADDING',(0,0),(-1,-1),18),('RIGHTPADDING',(0,0),(-1,-1),18),
+        ('LINEABOVE',(0,0),(-1,0),2.5,GOLD),('LINEBEFORE',(0,0),(0,-1),2.5,GOLD),
+        ('BOX',(0,0),(-1,-1),0.4,CREAM_DARK),
+    ]))
+    st.append(matters_box)
+    st.append(Spacer(1,0.14*inch))
+    col_w = (Cw - 0.14*inch) / 2
+    have_col=[
+        'A documented record in the IDR HHS Compliance Registry',
+        'Identified violations categorized by severity and regulatory citation',
+        'A defined remediation path with developer-ready fix guidance',
+        'A cryptographically sealed, publicly verifiable record of action',
+    ]
+    havenot_col=[
+        'Verified remediation — violations confirmed closed by external re-scan',
+        'Continuous monitoring — an ongoing weekly evidence log',
+        'A Remediation Verification Certificate — proof of completion',
+        'A completed compliance record — this is the beginning, not the end',
+    ]
+    def _have_row(text, has):
+        col = GREEN_PASS if has else RED_CRIT
+        sym = '✔' if has else '✘'
+        bg  = GREEN_LIGHT if has else RED_LIGHT
+        r2=Table([[
+            Paragraph(sym,ParagraphStyle('hs',fontName='Helvetica-Bold',fontSize=10,
+                                         textColor=col,leading=13,alignment=TA_CENTER)),
+            Paragraph(text,ParagraphStyle('ht',fontName='Times-Roman',fontSize=9,
+                                          textColor=CHARCOAL,leading=13)),
+        ]],colWidths=[0.22*inch,col_w-0.22*inch])
+        r2.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),bg),
+            ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
+            ('LEFTPADDING',(0,0),(-1,-1),8),
+            ('LINEBELOW',(0,0),(-1,-1),0.3,CREAM_DARK),
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ]))
+        return r2
+    have_hdr=Table([[Paragraph('AS OF THIS RECORD DATE — YOU HAVE',
+        ParagraphStyle('hh',fontName='Helvetica-Bold',fontSize=7,
+                       textColor=CREAM,leading=10,letterSpacing=1.0,alignment=TA_CENTER))]],
+        colWidths=[col_w])
+    have_hdr.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#0A1A0A')),
+        ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7),
+        ('LINEABOVE',(0,0),(-1,0),2.0,GREEN_PASS),
+    ]))
+    havenot_hdr=Table([[Paragraph('YOU DO NOT YET HAVE',
+        ParagraphStyle('nh',fontName='Helvetica-Bold',fontSize=7,
+                       textColor=CREAM,leading=10,letterSpacing=1.0,alignment=TA_CENTER))]],
+        colWidths=[col_w])
+    havenot_hdr.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#1A0A0A')),
+        ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7),
+        ('LINEABOVE',(0,0),(-1,0),2.0,RED_CRIT),
+    ]))
+    have_rows=[have_hdr]+[_have_row(t,True) for t in have_col]
+    havenot_rows=[havenot_hdr]+[_have_row(t,False) for t in havenot_col]
+    have_tbl=Table([[r] for r in have_rows],colWidths=[col_w])
+    have_tbl.setStyle(TableStyle([('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),
+                                   ('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0)]))
+    havenot_tbl=Table([[r] for r in havenot_rows],colWidths=[col_w])
+    havenot_tbl.setStyle(TableStyle([('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),
+                                      ('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0)]))
+    two_col=Table([[have_tbl,Spacer(0.14*inch,1),havenot_tbl]],
+                  colWidths=[col_w,0.14*inch,col_w])
+    two_col.setStyle(TableStyle([
+        ('VALIGN',(0,0),(-1,-1),'TOP'),
+        ('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),
+        ('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0),
+    ]))
+    st.append(two_col)
+    st.append(Spacer(1,0.14*inch))
+    decision=Table([[Paragraph(
+        '<b>The Decision This Record Creates</b><br/><br/>'
+        'This record will become one of two things. If remediation is completed and '
+        'independently verified, it becomes your <b>compliance defense</b> — documented proof '
+        'that your organization identified its exposure, acted on it, and maintained an '
+        'active compliance record. If violations remain unresolved, it becomes '
+        '<b>evidence of inaction</b> — proof that your organization was aware of the issues '
+        'and chose not to address them.<br/><br/>'
+        '<b>Your clock started at the timestamp on the cover of this document. '
+        'What happens in the next 30 days determines your regulatory posture.</b>',
+        ParagraphStyle('dc2',fontName='Times-Roman',fontSize=10,
+                       textColor=CREAM,leading=16))
+    ]],colWidths=[Cw])
+    decision.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,-1),NAVY_MID),
+        ('TOPPADDING',(0,0),(-1,-1),18),('BOTTOMPADDING',(0,0),(-1,-1),18),
+        ('LEFTPADDING',(0,0),(-1,-1),20),('RIGHTPADDING',(0,0),(-1,-1),20),
+        ('LINEABOVE',(0,0),(-1,0),3.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),3.0,GOLD),
+    ]))
+    st.append(KeepTogether(decision))
+    st.append(PageBreak())
+    return st
 def _toc(St):
     st=[]
     st.append(Paragraph('TABLE OF CONTENTS',St['ey']))
