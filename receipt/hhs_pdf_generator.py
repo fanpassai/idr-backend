@@ -406,9 +406,38 @@ def _cover(r, St, verify_url):
     st.append(Spacer(1,0.16*inch))
 
     # Data block — dark on navy
+    notice_text = (
+        '<font name="Helvetica-Bold" size="7" color="#8A6F2E">OFFICIAL RECORD NOTICE</font><br/><br/>'
+        '<font name="Times-Roman" size="8.5" color="#C9A84C">'
+        'This document constitutes a timestamped, human-verified Good Faith Effort Record '
+        'produced by the Institute of Digital Remediation. As of the record timestamp above, '
+        'this organization has formally initiated a documented compliance record under '
+        'Section 504 of the Rehabilitation Act and Section 1557 of the Affordable Care Act.'
+        '</font><br/><br/>'
+        '<font name="Helvetica-Bold" size="7" color="#8A6F2E">THIS RECORD HAS BEEN</font><br/>'
+        '<font name="Times-Roman" size="8" color="#FAF8F4">'
+        '&#x2713; Cryptographically sealed (SHA-256)  ·  '
+        '&#x2713; Registered in the IDR HHS Compliance Registry  ·  '
+        '&#x2713; Issued as a verifiable baseline of accessibility posture'
+        '</font>'
+    )
+    notice_box = Table([[Paragraph(notice_text,
+        ParagraphStyle('nb',fontName='Times-Roman',fontSize=8.5,
+                       textColor=GOLD,leading=14))]],
+        colWidths=[Cw])
+    notice_box.setStyle(TableStyle([
+        ('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#0D1520')),
+        ('TOPPADDING',(0,0),(-1,-1),14),('BOTTOMPADDING',(0,0),(-1,-1),14),
+        ('LEFTPADDING',(0,0),(-1,-1),18),('RIGHTPADDING',(0,0),(-1,-1),18),
+        ('LINEABOVE',(0,0),(-1,0),2.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),2.0,GOLD),
+        ('LINEBEFORE',(0,0),(0,-1),2.0,GOLD),
+        ('BOX',(0,0),(-1,-1),0.5,GOLD_DARK),
+    ]))
+    st.append(notice_box)
+    st.append(Spacer(1,0.12*inch))
     st.append(KV([
         ('REGISTRY ID',reg_id),
-        ('AUDIT DATE',f'{date_str}  ·  {time_str}'),
+        ('RECORD DATE',f'{date_str}  ·  {time_str}'),
         ('RECEIPT ID',rid),
         ('STANDARD','WCAG 2.1 Level AA  ·  Section 504  ·  Section 1557 ACA'),
         ('SHA-256',dhash[:36]+'…'),
