@@ -1645,6 +1645,74 @@ def stripe_hhs_webhook():
 
 # ── HHS Manual Audit Delivery ─────────────────────────────────────────────────
 
+@app.route('/api/hhs/crawl', methods=['POST', 'OPTIONS'])
+def hhs_crawl_trigger():
+    """
+    Triggers a multi-page crawl for a domain.
+    Called from the delivery console before generating the PDF.
+    Stores crawl results in hhs_audits.scan_json for use in PDF generation.
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        body     = request.get_json(silent=True) or {}
+        admin_key = body.get('admin_key', '').strip()
+        if admin_key != ADMIN_KEY:
+            return _error('Unauthorized', 401)
+
+        domain   = body.get('domain', '').strip().lower()
+        audit_id = body.get('audit_id')
+        max_pages = min(int(body.get('max_pages', 15)), 15)
+
+        if not domain:
+            return _error('domain required.', 400)
+
+        domain = domain.replace('https://','').replace('http://','').replace('www.','').split('/')[0]
+        start_url = f'https://{domain}'
+
+        print(f'[HHS CRAWL] Starting crawl for {domain} — max {max_pages} pages')
+
+        from hhs_crawler import run_hhs_crawl
+        crawl_result = run_hhs_crawl(start_url, max_pages=max_pages)
+
+        pages_scanned = crawl_result.get('pages_scanned', 0)
+        print(f'[HHS CRAWL] Complete — {pages_scanned} pages, score {crawl_result.get("overall_score", 0)}/100')
+
+        # Store crawl results in hhs_audits if audit_id provided
+        if audit_id and db_available:
+            try:
+                import json as _json
+                conn_c = get_conn()
+                if conn_c:
+                    with conn_c.cursor() as cur_c:
+                        cur_c.execute("""
+                            UPDATE hhs_audits
+                            SET scan_json = %s, updated_at = NOW()
+                            WHERE id = %s
+                        """, (_json.dumps(crawl_result), audit_id))
+                        conn_c.commit()
+                    conn_c.close()
+                    print(f'[HHS CRAWL] Stored crawl results for audit_id={audit_id}')
+            except Exception as ce:
+                print(f'[HHS CRAWL] DB store error (non-fatal): {ce}')
+
+        return jsonify({
+            'success':         True,
+            'domain':          domain,
+            'pages_scanned':   pages_scanned,
+            'overall_score':   crawl_result.get('overall_score', 0),
+            'critical_count':  crawl_result.get('critical_count', 0),
+            'total_issues':    crawl_result.get('total_issues', 0),
+            'crawl_duration_ms': crawl_result.get('crawl_duration_ms', 0),
+            'pages_crawled':   crawl_result.get('pages_crawled', []),
+            'scan':            crawl_result,
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(f'Crawl error: {str(e)}', 500)
+
+
 @app.route('/api/hhs/manual-deliver', methods=['POST', 'OPTIONS'])
 def hhs_manual_deliver():
     """
@@ -1689,6 +1757,40 @@ def hhs_manual_deliver():
 
         scan_data['manual_checks'] = manual_checks
         scan_data['domain']        = scan_data.get('domain', domain)
+
+        # ── Merge multi-page crawl results if available ───────────────────────
+        audit_id_for_crawl = body.get('audit_id')
+        try:
+            if audit_id_for_crawl and db_available:
+                import json as _cjson
+                conn_cl = get_conn()
+                if conn_cl:
+                    with conn_cl.cursor() as cur_cl:
+                        cur_cl.execute(
+                            'SELECT scan_json FROM hhs_audits WHERE id = %s',
+                            (audit_id_for_crawl,)
+                        )
+                        cl_row = cur_cl.fetchone()
+                    conn_cl.close()
+                    if cl_row and cl_row[0]:
+                        crawl_data = cl_row[0] if isinstance(cl_row[0], dict) else _cjson.loads(cl_row[0])
+                        if crawl_data.get('is_multi_page'):
+                            # Merge crawl findings into scan_data — crawl wins on categories
+                            scan_data['categories']      = crawl_data.get('categories', scan_data.get('categories', []))
+                            scan_data['pages_scanned']   = crawl_data.get('pages_scanned', 1)
+                            scan_data['pages_crawled']   = crawl_data.get('pages_crawled', [])
+                            scan_data['crawl_duration_ms'] = crawl_data.get('crawl_duration_ms', 0)
+                            scan_data['is_multi_page']   = True
+                            # Only override scores if crawl produced them
+                            if crawl_data.get('overall_score') is not None:
+                                scan_data['overall_score']  = crawl_data['overall_score']
+                                scan_data['overall_status'] = crawl_data['overall_status']
+                                scan_data['critical_count'] = crawl_data['critical_count']
+                                scan_data['serious_count']  = crawl_data['serious_count']
+                                scan_data['total_issues']   = crawl_data['total_issues']
+                            print(f'[HHS_DELIVER] Merged crawl data — {scan_data["pages_scanned"]} pages')
+        except Exception as cl_err:
+            print(f'[HHS_DELIVER] Crawl merge error (non-fatal): {cl_err}')
 
         import hashlib, json as _json
         payload_str = _json.dumps({
