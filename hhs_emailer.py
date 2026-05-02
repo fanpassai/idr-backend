@@ -684,3 +684,126 @@ def send_payment_notification(domain, email, amount, product_type):
     )
 
     return _send(NOTIFY_EMAIL, subject, html, from_name=FROM_ALERTS)
+
+
+# ── Reviewer Portal Emails ─────────────────────────────────────────────────────
+
+def send_reviewer_magic_link(email, reviewer_name, magic_link):
+    """Send magic login link to reviewer."""
+    first = reviewer_name.split()[0] if reviewer_name else 'there'
+    subject = 'Your IDR Reviewer Portal Login Link'
+    html = (
+        '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F8F6F1;">'
+        '<div style="max-width:560px;margin:32px auto;background:#FFFFFF;border:1px solid #E8E0D0;">'
+        '<div style="background:#0A0E1A;padding:24px 32px;">'
+        '<p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;'
+        'text-transform:uppercase;color:#C9A84C;margin:0 0 4px;">Institute of Digital Remediation</p>'
+        '<p style="font-family:Georgia,serif;font-size:18px;color:#FFFFFF;margin:0;">Reviewer Portal Access</p>'
+        '</div>'
+        '<div style="padding:32px;">'
+        '<p style="font-family:Georgia,serif;font-size:15px;color:#333;line-height:1.6;">Hi ' + first + ',</p>'
+        '<p style="font-family:Georgia,serif;font-size:15px;color:#555;line-height:1.6;">'
+        'Your login link for the IDR Reviewer Portal is below. It expires in 2 hours.'
+        '</p>'
+        '<div style="text-align:center;margin:28px 0;">'
+        '<a href="' + magic_link + '" style="display:inline-block;padding:14px 32px;background:#C9A84C;'
+        'font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.18em;'
+        'text-transform:uppercase;color:#0A0E1A;text-decoration:none;">Access Reviewer Portal &rarr;</a>'
+        '</div>'
+        '<p style="font-family:Arial,sans-serif;font-size:11px;color:#AAAAAA;line-height:1.6;">'
+        'If you did not request this link, ignore this email. Do not share this link with anyone.'
+        '</p>'
+        '<p style="font-family:Arial,sans-serif;font-size:10px;color:#CCCCCC;margin-top:24px;">'
+        'Institute of Digital Remediation &middot; Reviewer Access System'
+        '</p>'
+        '</div></div></body></html>'
+    )
+    return _send(email, subject, html, from_name='Institute of Digital Remediation')
+
+
+def send_reviewer_notification(audit_id, domain, audit_surface):
+    """Notify reviewer that a new audit job is ready."""
+    import os as _os
+    reviewer_email = _os.environ.get('REVIEWER_EMAIL', '')
+    if not reviewer_email:
+        print(f'[REVIEWER NOTIFY] REVIEWER_EMAIL not set — skipping notification for audit {audit_id}')
+        return False
+
+    surface_label = 'Full Patient Access Audit' if audit_surface == 'primary_and_transaction' else 'Primary Web Presence Audit'
+    checks_count  = '8 checks (5 primary + 3 transaction layer)' if audit_surface == 'primary_and_transaction' else '5 checks'
+    portal_url    = f'https://idrshield.com/idr-reviewer'
+
+    subject = f'New Audit Job Ready — {domain} ({surface_label})'
+    html = (
+        '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F8F6F1;">'
+        '<div style="max-width:580px;margin:32px auto;background:#FFFFFF;border:1px solid #E8E0D0;">'
+        '<div style="background:#0A0E1A;padding:24px 32px;">'
+        '<p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;'
+        'text-transform:uppercase;color:#C9A84C;margin:0 0 4px;">Institute of Digital Remediation</p>'
+        '<p style="font-family:Georgia,serif;font-size:18px;color:#FFFFFF;margin:0;">New Audit Job Assigned</p>'
+        '</div>'
+        '<div style="padding:28px 32px;">'
+        '<table style="width:100%;border-collapse:collapse;margin-bottom:24px;">'
+        '<tr><td style="padding:8px 12px;background:#FAF8F4;font-family:Arial,sans-serif;font-size:11px;'
+        'font-weight:700;color:#8A6F2E;text-transform:uppercase;letter-spacing:0.1em;width:40%;">Domain</td>'
+        '<td style="padding:8px 12px;background:#FAF8F4;font-family:Georgia,serif;font-size:13px;color:#333;">' + domain + '</td></tr>'
+        '<tr><td style="padding:8px 12px;font-family:Arial,sans-serif;font-size:11px;font-weight:700;'
+        'color:#8A6F2E;text-transform:uppercase;letter-spacing:0.1em;">Audit Type</td>'
+        '<td style="padding:8px 12px;font-family:Georgia,serif;font-size:13px;color:#333;">' + surface_label + '</td></tr>'
+        '<tr><td style="padding:8px 12px;background:#FAF8F4;font-family:Arial,sans-serif;font-size:11px;'
+        'font-weight:700;color:#8A6F2E;text-transform:uppercase;letter-spacing:0.1em;">Checks Required</td>'
+        '<td style="padding:8px 12px;background:#FAF8F4;font-family:Georgia,serif;font-size:13px;color:#333;">' + checks_count + '</td></tr>'
+        '<tr><td style="padding:8px 12px;font-family:Arial,sans-serif;font-size:11px;font-weight:700;'
+        'color:#8A6F2E;text-transform:uppercase;letter-spacing:0.1em;">Turnaround</td>'
+        '<td style="padding:8px 12px;font-family:Georgia,serif;font-size:13px;color:#C0392B;font-weight:700;">'
+        + ('48 hours' if audit_surface == 'primary_and_transaction' else '24 hours') + '</td></tr>'
+        '</table>'
+        '<div style="text-align:center;margin:24px 0;">'
+        '<a href="' + portal_url + '" style="display:inline-block;padding:14px 32px;background:#C9A84C;'
+        'font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.18em;'
+        'text-transform:uppercase;color:#0A0E1A;text-decoration:none;">Open Reviewer Portal &rarr;</a>'
+        '</div>'
+        '<p style="font-family:Arial,sans-serif;font-size:10px;color:#AAAAAA;text-align:center;">'
+        'Log in with your registered email address to access this job.'
+        '</p>'
+        '</div></div></body></html>'
+    )
+    print(f'[REVIEWER NOTIFY] Sending job notification to {reviewer_email} for audit {audit_id} — {domain}')
+    return _send(reviewer_email, subject, html, from_name='IDR Audit System')
+
+
+def send_reviewer_submission_alert(audit_id, domain, reviewer_name, surface_label):
+    """Alert admin when reviewer submits findings — links to delivery console."""
+    console_url = f'https://idrshield.com/hhs-audit-delivery?audit_id={audit_id}&domain={domain}'
+    subject = f'Findings Ready — {domain} — {surface_label}'
+    html = (
+        '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F8F6F1;">'
+        '<div style="max-width:560px;margin:32px auto;background:#FFFFFF;border:1px solid #E8E0D0;">'
+        '<div style="background:#0A0E1A;padding:24px 32px;">'
+        '<p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;'
+        'text-transform:uppercase;color:#C9A84C;margin:0 0 4px;">Institute of Digital Remediation</p>'
+        '<p style="font-family:Georgia,serif;font-size:18px;color:#FFFFFF;margin:0;">Reviewer Findings Submitted</p>'
+        '</div>'
+        '<div style="padding:28px 32px;">'
+        '<p style="font-family:Georgia,serif;font-size:15px;color:#333;line-height:1.6;">'
+        '<strong>' + reviewer_name + '</strong> has submitted findings for <strong>' + domain + '</strong>.<br>'
+        'Audit type: ' + surface_label +
+        '</p>'
+        '<div style="background:#FDF8F0;border-left:4px solid #C9A84C;padding:16px 20px;margin:20px 0;">'
+        '<p style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:#C9A84C;margin:0 0 6px;'
+        'letter-spacing:0.1em;text-transform:uppercase;">Ready to Deliver</p>'
+        '<p style="font-family:Georgia,serif;font-size:13px;color:#555;margin:0;">'
+        'Findings are pre-populated in the delivery console. Open below to review and deliver.'
+        '</p>'
+        '</div>'
+        '<div style="text-align:center;margin:24px 0;">'
+        '<a href="' + console_url + '" style="display:inline-block;padding:14px 32px;background:#C9A84C;'
+        'font-family:Arial,sans-serif;font-size:10px;font-weight:700;letter-spacing:0.18em;'
+        'text-transform:uppercase;color:#0A0E1A;text-decoration:none;">Open Delivery Console &rarr; ' + domain + '</a>'
+        '</div>'
+        '<p style="font-family:Arial,sans-serif;font-size:9px;color:#CCCCCC;text-align:center;">'
+        'IDR Shield &middot; Audit ID: ' + str(audit_id) +
+        '</p>'
+        '</div></div></body></html>'
+    )
+    return _send(NOTIFY_EMAIL, subject, html, from_name=FROM_ALERTS)
