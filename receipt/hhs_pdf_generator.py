@@ -463,7 +463,14 @@ def _cover(r, St, verify_url):
         ('RECORD DATE',f'{date_str}  ·  {time_str}'),
         ('RECEIPT ID',rid),
         ('STANDARD','WCAG 2.1 Level AA  ·  Section 504  ·  Section 1557 ACA'),
-        ('SCOPE','Primary Web Presence — Main public-facing website and directly linked informational pages. Patient portals, scheduling systems, intake forms, mobile applications, and third-party tools are outside this engagement unless explicitly included in a Full Patient Access Audit.'),
+        ('SCOPE', (
+            f'Full Patient Access Audit — Primary website + patient-facing transaction layer. '
+            if r.get('reviewer',{}).get('surface_label','') == 'Full Patient Access'
+            else 'Primary Web Presence — Main public-facing website and directly linked informational pages.'
+        ) + (
+            f' {scan.get("pages_scanned", 1)} page(s) evaluated across the domain.'
+            if scan.get('is_multi_page') else ' Primary homepage evaluated.'
+        )),
         ('SHA-256',dhash[:36]+'…'),
         ('PREPARED FOR',org_name),
     ],c1=1.75*inch,dark=True))
@@ -1165,6 +1172,77 @@ def _scan_receipt(r, St):
         ('LINEABOVE',(0,0),(-1,0),1.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),1.0,GOLD),
     ]))
     st.append(ct)
+
+    # ── Page Inventory (multi-page audits only) ────────────────────────────────
+    pages_crawled = scan.get('pages_crawled', [])
+    if pages_crawled and scan.get('is_multi_page'):
+        st.append(Spacer(1,0.14*inch))
+        st.append(Paragraph('PAGE INVENTORY',St['ey']))
+        st.append(GoldRule())
+        st.append(Spacer(1,0.06*inch))
+        st.append(Paragraph('Pages Evaluated in This Audit',St['h2']))
+        st.append(Paragraph(
+            f'The following {len(pages_crawled)} URL(s) were crawled and evaluated during '
+            f'this audit. Each page was assessed across all five WCAG 2.1 AA categories. '
+            f'The overall score represents the aggregated result across all evaluated pages.',
+            St['body']))
+        st.append(Spacer(1,0.08*inch))
+
+        hdr = Table([[
+            Paragraph('URL EVALUATED', ParagraphStyle('ph',fontName='Helvetica-Bold',fontSize=7,
+                textColor=colors.white,leading=10)),
+            Paragraph('PAGE TITLE', ParagraphStyle('ph2',fontName='Helvetica-Bold',fontSize=7,
+                textColor=colors.white,leading=10)),
+            Paragraph('SCORE', ParagraphStyle('ph3',fontName='Helvetica-Bold',fontSize=7,
+                textColor=colors.white,leading=10,alignment=TA_CENTER)),
+            Paragraph('CRITICAL', ParagraphStyle('ph4',fontName='Helvetica-Bold',fontSize=7,
+                textColor=colors.white,leading=10,alignment=TA_CENTER)),
+        ]], colWidths=[Cw*0.38, Cw*0.35, Cw*0.14, Cw*0.13])
+        hdr.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),NAVY),
+            ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7),
+            ('LEFTPADDING',(0,0),(-1,-1),8),
+        ]))
+        st.append(hdr)
+
+        for idx, pg in enumerate(pages_crawled[:15]):
+            pg_score = pg.get('score', 100)
+            pg_crits = pg.get('critical_count', 0)
+            pg_url   = pg.get('url', '')
+            pg_title = pg.get('title', pg_url)[:45]
+            sc_color = GREEN_PASS if pg_score >= 80 else AMBER_WARN if pg_score >= 60 else RED_CRIT
+            row_bg   = CREAM if idx % 2 == 0 else CREAM_MID
+            row = Table([[
+                Paragraph(f'<font name="Courier" size="7">{_esc(pg_url[:60])}</font>',
+                    ParagraphStyle('pu',fontName='Times-Roman',fontSize=8,
+                        textColor=CHARCOAL,leading=11)),
+                Paragraph(_esc(pg_title),
+                    ParagraphStyle('pt',fontName='Times-Roman',fontSize=8,
+                        textColor=GRAY_DARK,leading=11)),
+                Paragraph(f'<b>{pg_score}</b>',
+                    ParagraphStyle('ps',fontName='Helvetica-Bold',fontSize=9,
+                        textColor=sc_color,leading=11,alignment=TA_CENTER)),
+                Paragraph(f'<b>{pg_crits}</b>' if pg_crits > 0 else u'—',
+                    ParagraphStyle('pc',fontName='Helvetica-Bold',fontSize=9,
+                        textColor=RED_CRIT if pg_crits > 0 else GRAY_LIGHT,
+                        leading=11,alignment=TA_CENTER)),
+            ]], colWidths=[Cw*0.38, Cw*0.35, Cw*0.14, Cw*0.13])
+            row.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,-1),row_bg),
+                ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+                ('LEFTPADDING',(0,0),(-1,-1),8),
+                ('LINEBELOW',(0,0),(-1,-1),0.3,CREAM_DARK),
+                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ]))
+            st.append(row)
+
+        if len(pages_crawled) >= 15:
+            st.append(Spacer(1,0.06*inch))
+            st.append(Paragraph(
+                'Audit capped at 15 pages per engagement scope. '
+                'Additional pages may be covered under the Full Digital Footprint enterprise engagement.',
+                St['cnote']))
+
     st.append(PageBreak())
     return st
 
