@@ -1407,9 +1407,10 @@ def stripe_hhs_webhook():
     customer_details = session.get('customer_details', {}) or {}
     email            = customer_details.get('email', '') or ''
     is_audit         = (amount == 49700)
+    is_full_audit    = (amount == 119700)
     is_monitoring    = (amount == 4900)
 
-    print(f'[HHS WEBHOOK] domain={domain} email={email} amount={amount} audit={is_audit} monitoring={is_monitoring}')
+    print(f'[HHS WEBHOOK] domain={domain} email={email} amount={amount} audit={is_audit} full_audit={is_full_audit} monitoring={is_monitoring}')
 
     if not db_available:
         return jsonify({'received': True, 'action': 'db_unavailable'}), 200
@@ -1436,11 +1437,47 @@ def stripe_hhs_webhook():
                 conn.commit()
                 log_evidence(domain, 'STRIPE-HHS-AUDIT', 'HHS_AUDIT_PAYMENT',
                              f'$497 audit payment from {email}')
+                # Create hhs_audits job row for $497 primary audit
+                audit_id_primary = None
                 try:
-                    from hhs_emailer import send_hhs_activation_confirmation, send_payment_notification
+                    org_row_p = None
+                    with conn.cursor() as cur_p:
+                        cur_p.execute("""
+                            SELECT org_name, org_contact, org_title, org_phone, org_address
+                            FROM registry WHERE domain = %s
+                        """, (domain,))
+                        org_row_p = cur_p.fetchone()
+                    with conn.cursor() as cur_p2:
+                        cur_p2.execute("""
+                            INSERT INTO hhs_audits
+                                (domain, registry_id, client_email, audit_surface, product_amount,
+                                 status, org_name, org_contact, org_title, org_phone, org_address, created_at, updated_at)
+                            VALUES (%s, %s, %s, 'primary', 49700, 'pending_review', %s, %s, %s, %s, %s, NOW(), NOW())
+                            RETURNING id
+                        """, (
+                            domain,
+                            f'IDR-HHS-{domain.upper().replace(".", "-")}',
+                            email,
+                            org_row_p[0] if org_row_p else '',
+                            org_row_p[1] if org_row_p else '',
+                            org_row_p[2] if org_row_p else '',
+                            org_row_p[3] if org_row_p else '',
+                            org_row_p[4] if org_row_p else '',
+                        ))
+                        row_p = cur_p2.fetchone()
+                        audit_id_primary = row_p[0] if row_p else None
+                    conn.commit()
+                    print(f'[HHS WEBHOOK] hhs_audits job created id={audit_id_primary} for {domain} (primary audit)')
+                except Exception as je:
+                    print(f'[HHS WEBHOOK] hhs_audits insert error (primary): {je}')
+
+                try:
+                    from hhs_emailer import send_hhs_activation_confirmation, send_payment_notification, send_reviewer_notification
                     if email:
                         send_hhs_activation_confirmation(email, domain)
                     send_payment_notification(domain, email, 49700, 'audit')
+                    if audit_id_primary:
+                        send_reviewer_notification(audit_id_primary, domain, 'primary')
                 except Exception as ex:
                     print(f'[HHS WEBHOOK] Email error: {ex}')
                 if email:
@@ -1498,6 +1535,96 @@ def stripe_hhs_webhook():
                     'action':   'hhs_monitoring_activated',
                     'domain':   domain,
                     'status':   'active'
+                }), 200
+
+            elif is_full_audit:
+                # ── $1,197 Full Patient Access Audit ──────────────────────────
+                cur.execute("""
+                    INSERT INTO registry
+                        (domain, registry_id, status, hhs_enrolled, product_lane, activated_by, created_at, updated_at)
+                    VALUES
+                        (%s, %s, 'manual_verified', TRUE, 'hhs', %s, NOW(), NOW())
+                    ON CONFLICT (domain) DO UPDATE SET
+                        status       = 'manual_verified',
+                        hhs_enrolled = TRUE,
+                        product_lane = 'hhs',
+                        activated_by = COALESCE(registry.activated_by, EXCLUDED.activated_by),
+                        updated_at   = NOW()
+                """, (domain, f'IDR-HHS-{domain.upper().replace(".", "-")}', email))
+                conn.commit()
+                log_evidence(domain, 'STRIPE-HHS-FULL', 'HHS_FULL_AUDIT_PAYMENT',
+                             f'$1197 full patient access audit payment from {email}')
+
+                # Pull org capture data already stored
+                org_row = None
+                try:
+                    with conn.cursor() as cur2:
+                        cur2.execute("""
+                            SELECT org_name, org_contact, org_title, org_phone, org_address, audit_surface
+                            FROM registry WHERE domain = %s
+                        """, (domain,))
+                        org_row = cur2.fetchone()
+                except Exception:
+                    pass
+
+                # Create hhs_audits job row
+                audit_id = None
+                try:
+                    with conn.cursor() as cur3:
+                        cur3.execute("""
+                            INSERT INTO hhs_audits
+                                (domain, registry_id, client_email, audit_surface, product_amount,
+                                 status, org_name, org_contact, org_title, org_phone, org_address, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, 'pending_review', %s, %s, %s, %s, %s, NOW(), NOW())
+                            RETURNING id
+                        """, (
+                            domain,
+                            f'IDR-HHS-{domain.upper().replace(".", "-")}',
+                            email,
+                            'primary_and_transaction',
+                            119700,
+                            org_row[0] if org_row else '',
+                            org_row[1] if org_row else '',
+                            org_row[2] if org_row else '',
+                            org_row[3] if org_row else '',
+                            org_row[4] if org_row else '',
+                        ))
+                        row = cur3.fetchone()
+                        audit_id = row[0] if row else None
+                    conn.commit()
+                    print(f'[HHS WEBHOOK] hhs_audits job created id={audit_id} for {domain} (full audit)')
+                except Exception as je:
+                    print(f'[HHS WEBHOOK] hhs_audits insert error: {je}')
+
+                try:
+                    from hhs_emailer import send_hhs_activation_confirmation, send_payment_notification, send_reviewer_notification
+                    if email:
+                        send_hhs_activation_confirmation(email, domain)
+                    send_payment_notification(domain, email, 119700, 'full_audit')
+                    if audit_id:
+                        send_reviewer_notification(audit_id, domain, 'primary_and_transaction')
+                except Exception as ex:
+                    print(f'[HHS WEBHOOK] Email error: {ex}')
+
+                if email:
+                    try:
+                        from cron import HHS_UPSELL_STEPS
+                        queue_sequence(
+                            email    = email,
+                            domain   = domain,
+                            sequence = 'hhs_upsell',
+                            receipt  = {'registry_id': f'IDR-HHS-{domain.upper().replace(".", "-")}'},
+                            steps    = HHS_UPSELL_STEPS
+                        )
+                    except Exception as eq:
+                        print(f'[HHS WEBHOOK] Sequence queue error: {eq}')
+
+                return jsonify({
+                    'received':  True,
+                    'action':    'hhs_full_audit_activated',
+                    'domain':    domain,
+                    'audit_id':  audit_id,
+                    'status':    'manual_verified'
                 }), 200
 
             else:
@@ -1732,6 +1859,645 @@ def hhs_org_data(domain):
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+
+
+# ── IDR Reviewer Portal ───────────────────────────────────────────────────────
+# Eight routes serving Archana and the review team.
+# Magic-link auth pattern mirrors the existing member portal auth.
+
+REVIEWER_TOKEN_SECRET = os.environ.get('REVIEWER_TOKEN_SECRET', 'idr-reviewer-secret-2026')
+REVIEWER_FEE_PRIMARY  = 125   # $ per primary audit — update after contract signed
+REVIEWER_FEE_FULL     = 200   # $ per full patient access audit
+
+PRIMARY_CHECKS = [
+    {'slug': 'keyboard_nav',     'name': 'Keyboard Navigation',        'wcag_common': ['2.1.1', '2.1.2', '2.4.3', '2.4.7']},
+    {'slug': 'screen_reader',    'name': 'Screen Reader Pass',          'wcag_common': ['1.1.1', '1.3.1', '2.4.6', '4.1.2']},
+    {'slug': 'forms',            'name': 'Form Completion & Errors',    'wcag_common': ['1.3.1', '3.3.1', '3.3.2', '4.1.3']},
+    {'slug': 'zoom_stress',      'name': 'Visual Stress Test (200%)',   'wcag_common': ['1.4.4', '1.4.10', '1.4.11']},
+    {'slug': 'focus_indicators', 'name': 'Focus Indicator Verification','wcag_common': ['2.4.7', '2.4.11', '2.4.12']},
+]
+TRANSACTION_CHECKS = [
+    {'slug': 'scheduling_flow',  'name': 'Scheduling Flow Walk-Through','wcag_common': ['2.1.1', '4.1.2', '3.3.1', '2.4.3']},
+    {'slug': 'intake_forms',     'name': 'Patient Intake Forms',        'wcag_common': ['1.3.1', '3.3.1', '3.3.2', '4.1.3']},
+    {'slug': 'portal_entry',     'name': 'Patient Portal Entry',        'wcag_common': ['2.1.1', '4.1.2', '2.4.7', '3.3.1']},
+]
+
+
+def _get_reviewer_from_token(token):
+    """Validate reviewer session token, return reviewer row or None."""
+    import hashlib as _hl
+    if not token:
+        return None
+    try:
+        conn = get_conn()
+        if not conn:
+            return None
+        with conn.cursor() as cur:
+            token_hash = _hl.sha256(token.encode()).hexdigest()
+            cur.execute("""
+                SELECT r.id, r.name, r.email, r.credential_title, r.credential_number, r.active
+                FROM reviewer_tokens t
+                JOIN hhs_reviewers r ON r.id = t.reviewer_id
+                WHERE t.token_hash = %s
+                  AND t.expires_at > NOW()
+                  AND r.active = TRUE
+            """, (token_hash,))
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {'id': row[0], 'name': row[1], 'email': row[2],
+                'credential_title': row[3], 'credential_number': row[4]}
+    except Exception:
+        return None
+
+
+@app.route('/api/reviewer/login', methods=['POST', 'OPTIONS'])
+def reviewer_login():
+    """Reviewer submits email -> system sends magic link."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    try:
+        body  = request.get_json(silent=True) or {}
+        email = body.get('email', '').strip().lower()
+        if not email or '@' not in email:
+            return _error('Valid email required.', 400)
+
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+
+        reviewer = None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'SELECT id, name, active FROM hhs_reviewers WHERE email = %s',
+                    (email,)
+                )
+                reviewer = cur.fetchone()
+        finally:
+            conn.close()
+
+        # Always return 200 to prevent email enumeration
+        if not reviewer or not reviewer[2]:
+            print(f'[REVIEWER LOGIN] Unknown or inactive email: {email}')
+            return jsonify({'sent': True}), 200
+
+        import hashlib as _hl, secrets as _sec
+        raw_token   = _sec.token_hex(32)
+        token_hash  = _hl.sha256(raw_token.encode()).hexdigest()
+        reviewer_id = reviewer[0]
+        reviewer_name = reviewer[1]
+
+        conn2 = get_conn()
+        if conn2:
+            try:
+                with conn2.cursor() as cur2:
+                    cur2.execute("""
+                        INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at)
+                        VALUES (%s, %s, NOW() + INTERVAL '2 hours', NOW())
+                    """, (reviewer_id, token_hash))
+                    conn2.commit()
+            finally:
+                conn2.close()
+
+        magic_link = f'https://idrshield.com/idr-reviewer?token={raw_token}'
+
+        try:
+            from hhs_emailer import send_reviewer_magic_link
+            send_reviewer_magic_link(email, reviewer_name, magic_link)
+        except Exception as ex:
+            print(f'[REVIEWER LOGIN] Email error: {ex}')
+
+        print(f'[REVIEWER LOGIN] Magic link sent to {email}')
+        return jsonify({'sent': True}), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/verify', methods=['GET'])
+def reviewer_verify():
+    """Magic link click -> validates token -> returns 30-day session token."""
+    import hashlib as _hl, secrets as _sec
+    raw_token = request.args.get('token', '').strip()
+    if not raw_token:
+        return _error('Token required.', 400)
+
+    token_hash = _hl.sha256(raw_token.encode()).hexdigest()
+    conn = get_conn()
+    if not conn:
+        return _error('DB unavailable', 503)
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT t.reviewer_id, r.name, r.email, r.credential_title, r.credential_number
+                FROM reviewer_tokens t
+                JOIN hhs_reviewers r ON r.id = t.reviewer_id
+                WHERE t.token_hash = %s AND t.expires_at > NOW() AND r.active = TRUE
+            """, (token_hash,))
+            row = cur.fetchone()
+
+        if not row:
+            conn.close()
+            return _error('Token invalid or expired.', 401)
+
+        reviewer_id = row[0]
+        session_token = _sec.token_hex(32)
+        session_hash  = _hl.sha256(session_token.encode()).hexdigest()
+
+        with conn.cursor() as cur2:
+            # Invalidate old magic link token
+            cur2.execute('DELETE FROM reviewer_tokens WHERE token_hash = %s', (token_hash,))
+            # Store session token (30 days)
+            cur2.execute("""
+                INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at, is_session)
+                VALUES (%s, %s, NOW() + INTERVAL '30 days', NOW(), TRUE)
+            """, (reviewer_id, session_hash))
+            conn.commit()
+
+        conn.close()
+        return jsonify({
+            'session_token':     session_token,
+            'reviewer_id':       row[0],
+            'name':              row[1],
+            'email':             row[2],
+            'credential_title':  row[3],
+            'credential_number': row[4],
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        if conn:
+            conn.close()
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/jobs', methods=['GET', 'OPTIONS'])
+def reviewer_jobs():
+    """Returns all jobs for this reviewer + earnings tally."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, domain, audit_surface, product_amount, status,
+                       created_at, reviewer_submitted_at, delivered_at
+                FROM hhs_audits
+                WHERE reviewer_id = %s
+                ORDER BY created_at DESC
+            """, (reviewer['id'],))
+            rows = cur.fetchall()
+
+            # Tally this month
+            cur.execute("""
+                SELECT audit_surface, COUNT(*) as cnt
+                FROM hhs_audits
+                WHERE reviewer_id = %s
+                  AND reviewer_submitted_at >= date_trunc('month', NOW())
+                  AND status IN ('reviewer_submitted', 'delivered')
+                GROUP BY audit_surface
+            """, (reviewer['id'],))
+            tally_rows = cur.fetchall()
+        conn.close()
+
+        jobs = []
+        for r in rows:
+            jobs.append({
+                'audit_id':      r[0],
+                'domain':        r[1],
+                'audit_surface': r[2],
+                'surface_label': 'Full Patient Access' if r[2] == 'primary_and_transaction' else 'Primary Web Presence',
+                'product_amount': r[3],
+                'status':        r[4],
+                'created_at':    r[5].isoformat() if r[5] else None,
+                'submitted_at':  r[6].isoformat() if r[6] else None,
+                'delivered_at':  r[7].isoformat() if r[7] else None,
+            })
+
+        tally = {'primary': 0, 'full': 0, 'primary_fee': REVIEWER_FEE_PRIMARY, 'full_fee': REVIEWER_FEE_FULL}
+        for t in tally_rows:
+            if t[0] == 'primary':
+                tally['primary'] = t[1]
+            elif t[0] == 'primary_and_transaction':
+                tally['full'] = t[1]
+        tally['total_owed'] = (tally['primary'] * REVIEWER_FEE_PRIMARY) + (tally['full'] * REVIEWER_FEE_FULL)
+
+        return jsonify({'jobs': jobs, 'tally': tally, 'reviewer': reviewer}), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/job/<int:audit_id>', methods=['GET', 'OPTIONS'])
+def reviewer_job_detail(audit_id):
+    """Full audit brief for one job including existing findings."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, domain, registry_id, client_email, audit_surface, product_amount,
+                       status, org_name, org_contact, org_title, org_phone, org_address,
+                       scan_json, reviewer_session_start, reviewer_submitted_at, created_at
+                FROM hhs_audits
+                WHERE id = %s AND reviewer_id = %s
+            """, (audit_id, reviewer['id']))
+            job = cur.fetchone()
+
+            if not job:
+                conn.close()
+                return _error('Job not found.', 404)
+
+            cur.execute("""
+                SELECT id, check_slug, check_name, result, finding_text,
+                       wcag_criterion, severity, screenshot_count
+                FROM hhs_reviewer_findings
+                WHERE audit_id = %s
+                ORDER BY id
+            """, (audit_id,))
+            findings = cur.fetchall()
+
+            cur.execute("""
+                SELECT f.id AS finding_id, f.check_slug, s.id, s.filename, s.file_path
+                FROM hhs_reviewer_screenshots s
+                JOIN hhs_reviewer_findings f ON f.id = s.finding_id
+                WHERE s.audit_id = %s
+                ORDER BY s.uploaded_at
+            """, (audit_id,))
+            screenshots = cur.fetchall()
+        conn.close()
+
+        surface = job[4]
+        checks  = PRIMARY_CHECKS + (TRANSACTION_CHECKS if surface == 'primary_and_transaction' else [])
+
+        findings_map = {}
+        for f in findings:
+            findings_map[f[1]] = {
+                'finding_id':    f[0],
+                'check_slug':    f[1],
+                'check_name':    f[2],
+                'result':        f[3],
+                'finding_text':  f[4],
+                'wcag_criterion': f[5],
+                'severity':      f[6],
+                'screenshot_count': f[7],
+                'screenshots':   [],
+            }
+
+        for s in screenshots:
+            slug = s[1]
+            if slug in findings_map:
+                findings_map[slug]['screenshots'].append({
+                    'screenshot_id': s[2],
+                    'filename':      s[3],
+                    'url':           f'/api/reviewer/screenshot-file/{audit_id}/{s[2]}',
+                })
+
+        # Merge check list with existing findings
+        check_list = []
+        for c in checks:
+            existing = findings_map.get(c['slug'], {})
+            check_list.append({
+                'slug':        c['slug'],
+                'name':        c['name'],
+                'wcag_common': c['wcag_common'],
+                'result':      existing.get('result', 'pending'),
+                'finding_text': existing.get('finding_text', ''),
+                'wcag_criterion': existing.get('wcag_criterion', ''),
+                'severity':    existing.get('severity', ''),
+                'screenshot_count': existing.get('screenshot_count', 0),
+                'screenshots': existing.get('screenshots', []),
+                'finding_id':  existing.get('finding_id'),
+            })
+
+        return jsonify({
+            'audit_id':      job[0],
+            'domain':        job[1],
+            'registry_id':   job[2],
+            'client_email':  job[3],
+            'audit_surface': surface,
+            'surface_label': 'Full Patient Access' if surface == 'primary_and_transaction' else 'Primary Web Presence',
+            'product_amount': job[5],
+            'status':        job[6],
+            'org_name':      job[7],
+            'org_contact':   job[8],
+            'org_title':     job[9],
+            'org_phone':     job[10],
+            'org_address':   job[11],
+            'scan_json':     job[12],
+            'session_start': job[13].isoformat() if job[13] else None,
+            'submitted_at':  job[14].isoformat() if job[14] else None,
+            'created_at':    job[15].isoformat() if job[15] else None,
+            'checks':        check_list,
+            'total_checks':  len(checks),
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/session-start/<int:audit_id>', methods=['POST', 'OPTIONS'])
+def reviewer_session_start(audit_id):
+    """Records when reviewer first opens the job portal."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE hhs_audits
+                SET reviewer_session_start = COALESCE(reviewer_session_start, NOW()),
+                    updated_at = NOW()
+                WHERE id = %s AND reviewer_id = %s
+            """, (audit_id, reviewer['id']))
+            conn.commit()
+        conn.close()
+        return jsonify({'recorded': True}), 200
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/finding/<int:audit_id>', methods=['POST', 'OPTIONS'])
+def reviewer_save_finding(audit_id):
+    """Auto-save a single check finding. Called on every field change."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        body         = request.get_json(silent=True) or {}
+        check_slug   = body.get('check_slug', '').strip()
+        check_name   = body.get('check_name', '').strip()
+        result       = body.get('result', 'pending').strip()
+        finding_text = body.get('finding_text', '').strip()
+        wcag         = body.get('wcag_criterion', '').strip()
+        severity     = body.get('severity', '').strip()
+
+        if not check_slug:
+            return _error('check_slug required.', 400)
+
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO hhs_reviewer_findings
+                    (audit_id, check_slug, check_name, result, finding_text,
+                     wcag_criterion, severity, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                ON CONFLICT (audit_id, check_slug) DO UPDATE SET
+                    result        = EXCLUDED.result,
+                    finding_text  = EXCLUDED.finding_text,
+                    wcag_criterion = EXCLUDED.wcag_criterion,
+                    severity      = EXCLUDED.severity,
+                    updated_at    = NOW()
+                RETURNING id
+            """, (audit_id, check_slug, check_name, result, finding_text, wcag, severity))
+            row = cur.fetchone()
+            finding_id = row[0] if row else None
+            conn.commit()
+        conn.close()
+        return jsonify({'saved': True, 'finding_id': finding_id}), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/screenshot/<int:audit_id>/<int:finding_id>', methods=['POST', 'OPTIONS'])
+def reviewer_upload_screenshot(audit_id, finding_id):
+    """Multipart screenshot upload. Stores file, creates DB row."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        import os as _os
+        if 'file' not in request.files:
+            return _error('No file uploaded.', 400)
+
+        f        = request.files['file']
+        slug     = request.form.get('check_slug', 'unknown')
+        wcag     = request.form.get('wcag_criterion', '')
+        domain   = request.form.get('domain', 'domain')
+
+        ext      = f.filename.rsplit('.', 1)[-1].lower() if '.' in f.filename else 'png'
+        if ext not in ('png', 'jpg', 'jpeg', 'gif', 'webp'):
+            return _error('Only image files accepted.', 400)
+
+        upload_dir = _os.environ.get('SCREENSHOT_UPLOAD_DIR', '/tmp/idr_screenshots')
+        job_dir    = _os.path.join(upload_dir, str(audit_id))
+        _os.makedirs(job_dir, exist_ok=True)
+
+        # System-generated filename — no naming convention needed from Archana
+        conn = get_conn()
+        seq = 1
+        if conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT COUNT(*) FROM hhs_reviewer_screenshots WHERE finding_id = %s', (finding_id,))
+                seq = (cur.fetchone()[0] or 0) + 1
+
+        filename  = f'{domain.replace(".", "-")}_{slug}_{wcag.replace(".", "-")}_{seq:02d}.{ext}'
+        file_path = _os.path.join(job_dir, filename)
+        f.save(file_path)
+        file_size = _os.path.getsize(file_path)
+
+        if conn:
+            try:
+                with conn.cursor() as cur2:
+                    cur2.execute("""
+                        INSERT INTO hhs_reviewer_screenshots
+                            (audit_id, finding_id, filename, file_path, file_size_bytes, uploaded_at)
+                        VALUES (%s, %s, %s, %s, %s, NOW())
+                        RETURNING id
+                    """, (audit_id, finding_id, filename, file_path, file_size))
+                    scr_row = cur2.fetchone()
+                    cur2.execute("""
+                        UPDATE hhs_reviewer_findings
+                        SET screenshot_count = screenshot_count + 1, updated_at = NOW()
+                        WHERE id = %s
+                    """, (finding_id,))
+                    conn.commit()
+                screenshot_id = scr_row[0] if scr_row else None
+            finally:
+                conn.close()
+
+        print(f'[REVIEWER UPLOAD] {filename} saved for audit {audit_id}')
+        return jsonify({
+            'saved':          True,
+            'screenshot_id':  screenshot_id,
+            'filename':       filename,
+            'url':            f'/api/reviewer/screenshot-file/{audit_id}/{screenshot_id}',
+        }), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/screenshot-file/<int:audit_id>/<int:screenshot_id>', methods=['GET'])
+def reviewer_screenshot_file(audit_id, screenshot_id):
+    """Serve a stored screenshot file — requires reviewer auth."""
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+        with conn.cursor() as cur:
+            cur.execute(
+                'SELECT file_path, filename FROM hhs_reviewer_screenshots WHERE id = %s AND audit_id = %s',
+                (screenshot_id, audit_id)
+            )
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return _error('Screenshot not found.', 404)
+        return send_file(row[0], download_name=row[1], as_attachment=False)
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
+@app.route('/api/reviewer/submit/<int:audit_id>', methods=['POST', 'OPTIONS'])
+def reviewer_submit(audit_id):
+    """Reviewer marks job complete. Records session end. Notifies admin."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    token    = request.headers.get('Authorization', '').replace('Bearer ', '').strip()
+    reviewer = _get_reviewer_from_token(token)
+    if not reviewer:
+        return _error('Unauthorized', 401)
+
+    try:
+        body = request.get_json(silent=True) or {}
+        # Self-reported reviewer credentials for this specific audit
+        reviewer_name        = body.get('reviewer_name', reviewer['name']).strip()
+        reviewer_credentials = body.get('reviewer_credentials', reviewer['credential_title']).strip()
+        reviewer_cred_number = body.get('reviewer_credential_number', reviewer['credential_number']).strip()
+
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+
+        with conn.cursor() as cur:
+            # Verify all checks have a result
+            cur.execute("""
+                SELECT a.audit_surface,
+                       COUNT(f.id) AS submitted_checks
+                FROM hhs_audits a
+                LEFT JOIN hhs_reviewer_findings f ON f.audit_id = a.id AND f.result != 'pending'
+                WHERE a.id = %s AND a.reviewer_id = %s
+                GROUP BY a.audit_surface
+            """, (audit_id, reviewer['id']))
+            row = cur.fetchone()
+
+            if not row:
+                conn.close()
+                return _error('Job not found.', 404)
+
+            surface        = row[0]
+            submitted_cnt  = row[1] or 0
+            required_cnt   = 5 + (3 if surface == 'primary_and_transaction' else 0)
+
+            if submitted_cnt < required_cnt:
+                conn.close()
+                return _error(
+                    f'All {required_cnt} checks must have a result before submitting. '
+                    f'Currently {submitted_cnt} completed.', 400
+                )
+
+            # Record submission
+            cur.execute("""
+                UPDATE hhs_audits SET
+                    status                  = 'reviewer_submitted',
+                    reviewer_session_end    = NOW(),
+                    reviewer_submitted_at   = NOW(),
+                    updated_at              = NOW()
+                WHERE id = %s AND reviewer_id = %s
+            """, (audit_id, reviewer['id']))
+
+            # Store self-reported credentials for this audit
+            cur.execute("""
+                ALTER TABLE hhs_audits
+                ADD COLUMN IF NOT EXISTS reviewer_name_submitted TEXT,
+                ADD COLUMN IF NOT EXISTS reviewer_credentials_submitted TEXT,
+                ADD COLUMN IF NOT EXISTS reviewer_cred_number_submitted TEXT
+            """)
+            cur.execute("""
+                UPDATE hhs_audits SET
+                    reviewer_name_submitted        = %s,
+                    reviewer_credentials_submitted = %s,
+                    reviewer_cred_number_submitted = %s
+                WHERE id = %s
+            """, (reviewer_name, reviewer_credentials, reviewer_cred_number, audit_id))
+
+            # Get domain for notification
+            cur.execute('SELECT domain FROM hhs_audits WHERE id = %s', (audit_id,))
+            domain_row = cur.fetchone()
+            domain = domain_row[0] if domain_row else 'unknown'
+            conn.commit()
+        conn.close()
+
+        # Notify admin
+        try:
+            from hhs_emailer import send_reviewer_submission_alert
+            send_reviewer_submission_alert(
+                audit_id         = audit_id,
+                domain           = domain,
+                reviewer_name    = reviewer_name,
+                surface_label    = 'Full Patient Access' if surface == 'primary_and_transaction' else 'Primary Web Presence',
+            )
+        except Exception as ex:
+            print(f'[REVIEWER SUBMIT] Alert email error: {ex}')
+
+        print(f'[REVIEWER SUBMIT] audit_id={audit_id} domain={domain} reviewer={reviewer_name} submitted')
+        return jsonify({'submitted': True, 'audit_id': audit_id, 'domain': domain}), 200
+
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
