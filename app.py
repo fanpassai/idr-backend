@@ -1700,6 +1700,75 @@ def hhs_manual_deliver():
         }, sort_keys=True)
         doc_hash = hashlib.sha256(payload_str.encode()).hexdigest()
 
+        # ── Pull reviewer portal data if available for this domain ──────────
+        reviewer_data = {}
+        audit_id_for_pdf = body.get('audit_id')
+        try:
+            conn_rv = get_conn()
+            if conn_rv:
+                with conn_rv.cursor() as cur_rv:
+                    if audit_id_for_pdf:
+                        cur_rv.execute("""
+                            SELECT reviewer_name_submitted, reviewer_credentials_submitted,
+                                   reviewer_cred_number_submitted,
+                                   reviewer_session_start, reviewer_session_end,
+                                   reviewer_submitted_at, audit_surface
+                            FROM hhs_audits WHERE id = %s
+                        """, (audit_id_for_pdf,))
+                    else:
+                        cur_rv.execute("""
+                            SELECT reviewer_name_submitted, reviewer_credentials_submitted,
+                                   reviewer_cred_number_submitted,
+                                   reviewer_session_start, reviewer_session_end,
+                                   reviewer_submitted_at, audit_surface
+                            FROM hhs_audits WHERE domain = %s
+                            AND status IN ('reviewer_submitted','delivered')
+                            ORDER BY created_at DESC LIMIT 1
+                        """, (domain,))
+                    rv_row = cur_rv.fetchone()
+                    if rv_row and rv_row[0]:
+                        reviewer_data['name']        = rv_row[0] or ''
+                        reviewer_data['credentials'] = rv_row[1] or ''
+                        reviewer_data['credential_number'] = rv_row[2] or ''
+                        if rv_row[3]: reviewer_data['session_start'] = rv_row[3].strftime('%Y-%m-%d %H:%M UTC')
+                        if rv_row[4]: reviewer_data['session_end']   = rv_row[4].strftime('%Y-%m-%d %H:%M UTC')
+                        if rv_row[3] and rv_row[4]:
+                            mins = int((rv_row[4] - rv_row[3]).total_seconds() / 60)
+                            reviewer_data['session_duration_minutes'] = mins
+                        if rv_row[5]: reviewer_data['submitted_at'] = rv_row[5].strftime('%Y-%m-%d %H:%M UTC')
+                        surf = rv_row[6] or 'primary'
+                        reviewer_data['surface_label'] = 'Full Patient Access' if surf == 'primary_and_transaction' else 'Primary Web Presence'
+
+                    # Pull reviewer check findings
+                    if audit_id_for_pdf:
+                        cur_rv.execute("""
+                            SELECT check_slug, check_name, result, finding_text,
+                                   wcag_criterion, severity
+                            FROM hhs_reviewer_findings
+                            WHERE audit_id = %s ORDER BY id
+                        """, (audit_id_for_pdf,))
+                    else:
+                        cur_rv.execute("""
+                            SELECT f.check_slug, f.check_name, f.result, f.finding_text,
+                                   f.wcag_criterion, f.severity
+                            FROM hhs_reviewer_findings f
+                            JOIN hhs_audits a ON a.id = f.audit_id
+                            WHERE a.domain = %s
+                              AND a.status IN ('reviewer_submitted','delivered')
+                            ORDER BY a.created_at DESC, f.id
+                        """, (domain,))
+                    finding_rows = cur_rv.fetchall()
+                    if finding_rows:
+                        reviewer_data['checks'] = [
+                            {'slug': fr[0], 'check_name': fr[1], 'result': fr[2],
+                             'finding_text': fr[3] or '', 'wcag_criterion': fr[4] or '',
+                             'severity': fr[5] or ''}
+                            for fr in finding_rows
+                        ]
+                conn_rv.close()
+        except Exception as rv_err:
+            print(f'[HHS_DELIVER] Reviewer data fetch error (non-fatal): {rv_err}')
+
         receipt_data = {
             'receipt_id':    receipt_id,
             'registry_id':   registry_id,
@@ -1708,6 +1777,7 @@ def hhs_manual_deliver():
             'activated_by':  client_email,
             'organization':  organization,
             'scan':          scan_data,
+            'reviewer':      reviewer_data,
         }
 
         from receipt.hhs_pdf_generator import generate_hhs_pdf
