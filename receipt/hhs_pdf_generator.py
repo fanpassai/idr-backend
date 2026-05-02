@@ -19,6 +19,29 @@ from reportlab.platypus.flowables import Flowable
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 from reportlab.lib.utils import ImageReader
 import qrcode, qrcode.constants
+import urllib.request as _ur, os as _os, tempfile as _tf
+
+# ── Cursive signature font (Dancing Script via Google Fonts) ───────────────────
+def _ensure_cursive_font():
+    """Download and register Dancing Script Bold for the signature line."""
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        # Check if already registered
+        if 'DancingScript' in pdfmetrics.getRegisteredFontNames():
+            return True
+        # Try to download
+        url = 'https://github.com/google/fonts/raw/main/ofl/dancingscript/DancingScript-Bold.ttf'
+        tmp = _os.path.join(_tf.gettempdir(), 'DancingScript-Bold.ttf')
+        if not _os.path.exists(tmp):
+            _ur.urlretrieve(url, tmp)
+        pdfmetrics.registerFont(TTFont('DancingScript', tmp))
+        return True
+    except Exception as e:
+        print(f'[PDF] Cursive font not available: {e}')
+        return False
+
+_CURSIVE_LOADED = _ensure_cursive_font()
 
 # ── Palette ────────────────────────────────────────────────────────────────────
 NAVY        = colors.HexColor('#0A0E1A')
@@ -322,7 +345,7 @@ def Ss():
         'bi':    p('bi',fontName='Times-Italic',fontSize=10,textColor=GRAY_DARK,leading=14),
         'impact':p('im',fontName='Times-BoldItalic',fontSize=10,textColor=NAVY,leading=15,spaceBefore=4,spaceAfter=4),
         'mono':  p('mo',fontName='Courier',fontSize=8,textColor=CHARCOAL,leading=11),
-        'sname': p('sn',fontName='Times-BoldItalic',fontSize=26,textColor=NAVY,leading=30,spaceAfter=4),
+        'sname': p('sn',fontName='DancingScript' if _CURSIVE_LOADED else 'Times-BoldItalic',fontSize=28,textColor=NAVY,leading=34,spaceAfter=4),
         'sdet':  p('sd',fontName='Helvetica',fontSize=8,textColor=GRAY_MID,leading=12,spaceAfter=2),
         'csm':   p('cs',fontName='Helvetica',fontSize=7,textColor=GRAY_LIGHT,leading=9,alignment=TA_CENTER),
         'toch':  p('th',fontName='Times-Bold',fontSize=9.5,textColor=NAVY,leading=14,spaceAfter=0),
@@ -816,6 +839,21 @@ def _certification(r, St):
     reg_id=r.get('registry_id',''); rid=r.get('receipt_id','')
     ts=r.get('timestamp_utc',''); date_str,time_str=_dt(ts); Cw=W()
 
+    # ── Reviewer credentials — from portal submission or fallback ──────────────
+    rv = r.get('reviewer', {})
+    rv_name   = rv.get('name', 'Hans-Peter Nkansah')
+    rv_creds  = rv.get('credentials', 'Lead Accessibility Auditor')
+    rv_crednum= rv.get('credential_number', '')
+    rv_role   = rv.get('role', 'Lead Accessibility Auditor')
+    rv_surface= rv.get('surface_label', 'Primary Web Presence')
+    rv_session_start = rv.get('session_start', '')
+    rv_session_end   = rv.get('session_end', '')
+    rv_duration      = rv.get('session_duration_minutes', '')
+    rv_submitted     = rv.get('submitted_at', '')
+
+    # Determine if this is HP signing or a reviewer
+    is_reviewer = rv_name != 'Hans-Peter Nkansah'
+
     st=[]
     st.append(Paragraph('AUDITOR CERTIFICATION',St['ey']))
     st.append(GoldRule())
@@ -823,15 +861,29 @@ def _certification(r, St):
     st.append(Paragraph('Auditor Certification',St['h1']))
     st.append(Paragraph('Formal Human Verification Statement',St['bi']))
     st.append(Spacer(1,0.10*inch))
-    st.append(Paragraph(
-        f'I, Hans-Peter Nkansah, Lead Accessibility Auditor of the Institute of Digital '
-        f'Remediation, hereby certify that I have personally reviewed and validated the '
-        f'accessibility audit conducted for <b>{org_name}</b> ({domain}) on '
-        f'<b>{date_str} at {time_str}</b>.',St['body']))
+
+    if is_reviewer:
+        cert_intro = (
+            f'I, <b>{rv_name}</b>, {rv_role} ({rv_creds}), hereby certify that I have '
+            f'personally conducted and validated the accessibility review for <b>{org_name}</b> '
+            f'({domain}) on <b>{date_str} at {time_str}</b>. This engagement was conducted '
+            f'under the auspices of the Institute of Digital Remediation.'
+        )
+    else:
+        cert_intro = (
+            f'I, <b>Hans-Peter Nkansah</b>, Lead Accessibility Auditor of the Institute of '
+            f'Digital Remediation, hereby certify that I have personally reviewed and validated '
+            f'the accessibility audit conducted for <b>{org_name}</b> ({domain}) on '
+            f'<b>{date_str} at {time_str}</b>.'
+        )
+    st.append(Paragraph(cert_intro, St['body']))
     st.append(Spacer(1,0.08*inch))
+
+    checks_label = '8-point' if rv_surface == 'Full Patient Access' else 'five-point'
     for i,item in enumerate([
         f'I have reviewed all automated scan results and confirmed violations are accurately categorized per WCAG 2.1 Level A and AA success criteria.',
-        f'I have performed the five-point manual validation protocol documented in Section 13: keyboard navigation, screen reader pass, form completion, PDF accessibility review, and visual stress testing.',
+        f'I have performed the {checks_label} manual validation protocol: keyboard navigation, screen reader pass, form completion, visual stress testing, and focus indicator verification'
+        + (' — plus scheduling flow walk-through, patient intake forms, and patient portal entry for the transaction layer.' if rv_surface == 'Full Patient Access' else '.'),
         f'All findings reflect the accessibility state of the target site at the time of audit. This record documents the organization\'s posture as of {date_str}.',
         f'This record is registered in the IDR HHS Compliance Registry under ID <b>{reg_id}</b> and is publicly verifiable at idrshield.com/hhs-verify/{domain}.',
         f'This document is produced in accordance with WCAG 2.1 Level AA, Section 504 of the Rehabilitation Act of 1973, and Section 1557 of the Affordable Care Act of 2010.',
@@ -847,7 +899,43 @@ def _certification(r, St):
                                   ('LEFTPADDING',(1,0),(1,0),10),
                                   ('LINEBELOW',(0,0),(-1,-1),0.3,CREAM_DARK)]))
         st.append(row)
-    st.append(Spacer(1,0.12*inch))
+    st.append(Spacer(1,0.10*inch))
+
+    # ── Reviewer session log (only if reviewer portal data present) ────────────
+    if is_reviewer and (rv_session_start or rv_duration):
+        session_rows = [('REVIEWER', rv_name)]
+        if rv_creds:   session_rows.append(('CREDENTIALS', rv_creds))
+        if rv_crednum: session_rows.append(('CREDENTIAL NUMBER', rv_crednum))
+        if rv_surface: session_rows.append(('AUDIT SURFACE', rv_surface))
+        if rv_session_start: session_rows.append(('SESSION INITIATED', rv_session_start))
+        if rv_session_end:   session_rows.append(('SESSION COMPLETED', rv_session_end))
+        if rv_duration:      session_rows.append(('SESSION DURATION', str(rv_duration) + ' minutes'))
+        if rv_submitted:     session_rows.append(('FINDINGS SUBMITTED', rv_submitted))
+
+        session_tbl = Table([[
+            Paragraph('REVIEWER SESSION LOG',
+                ParagraphStyle('rsl',fontName='Helvetica-Bold',fontSize=6,
+                    textColor=GOLD_DARK,leading=9,letterSpacing=1.8)),
+        ]]+[[
+            Paragraph(k, ParagraphStyle('rsk',fontName='Helvetica-Bold',fontSize=7,
+                textColor=GRAY_MID,leading=10,letterSpacing=0.4)),
+            Paragraph(v, ParagraphStyle('rsv',fontName='Courier',fontSize=8,
+                textColor=CHARCOAL,leading=11)),
+        ] for k,v in session_rows], colWidths=[1.8*inch, Cw-1.8*inch])
+        session_tbl.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#0A0E1A')),
+            ('TEXTCOLOR',(0,0),(-1,0),GOLD),
+            ('SPAN',(0,0),(-1,0)),
+            ('BACKGROUND',(0,1),(0,-1),CREAM_MID),
+            ('BACKGROUND',(1,1),(1,-1),CREAM),
+            ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+            ('LEFTPADDING',(0,0),(-1,-1),10),
+            ('GRID',(0,0),(-1,-1),0.4,CREAM_DARK),
+            ('LINEABOVE',(0,0),(-1,0),2.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),2.0,GOLD),
+        ]))
+        st.append(session_tbl)
+        st.append(Spacer(1,0.10*inch))
+
     lt=Table([[Paragraph(
         '<b>SCOPE AND LIMITATIONS</b><br/><br/>'
         'This audit documents the accessibility posture as of the audit date. It does not constitute '
@@ -866,9 +954,26 @@ def _certification(r, St):
     st.append(Spacer(1,0.12*inch))
     st.append(GoldRule(h=0.75))
     st.append(Spacer(1,0.10*inch))
-    st.append(Paragraph('Hans-Peter Nkansah',St['sname']))
-    st.append(Paragraph(f'Lead Accessibility Auditor · Institute of Digital Remediation',St['sdet']))
-    st.append(Paragraph(f'Certified: {date_str}  ·  Record: {rid}',St['sdet']))
+
+    # ── Reviewer signature block ───────────────────────────────────────────────
+    if is_reviewer:
+        st.append(Paragraph(rv_name, St['sname']))
+        st.append(Paragraph(f'{rv_creds} · {rv_role}', St['sdet']))
+        if rv_crednum:
+            st.append(Paragraph(f'Credential No. {rv_crednum}', St['sdet']))
+        st.append(Paragraph(f'Certified: {date_str}  ·  Record: {rid}', St['sdet']))
+        st.append(Spacer(1,0.14*inch))
+        # HP counter-signs as Director
+        st.append(GoldRule(h=0.5))
+        st.append(Spacer(1,0.08*inch))
+        st.append(Paragraph('Hans-Peter Nkansah', St['sname']))
+        st.append(Paragraph('Founder & Director · Institute of Digital Remediation', St['sdet']))
+        st.append(Paragraph(f'Countersigned: {date_str}  ·  Record: {rid}', St['sdet']))
+    else:
+        st.append(Paragraph('Hans-Peter Nkansah', St['sname']))
+        st.append(Paragraph(f'Lead Accessibility Auditor · Institute of Digital Remediation', St['sdet']))
+        st.append(Paragraph(f'Certified: {date_str}  ·  Record: {rid}', St['sdet']))
+
     st.append(PageBreak())
     return st
 
@@ -1258,45 +1363,112 @@ def _human_validation(r, St):
     org=r.get('organization',{}); org_name=org.get('name',domain)
     ts=r.get('timestamp_utc',''); date_str,time_str=_dt(ts); Cw=W()
 
+    rv = r.get('reviewer', {})
+    rv_name   = rv.get('name', 'Hans-Peter Nkansah')
+    rv_creds  = rv.get('credentials', '')
+    rv_surface= rv.get('surface_label', 'Primary Web Presence')
+    is_reviewer = rv_name != 'Hans-Peter Nkansah'
+
+    # Pull reviewer portal findings if available
+    portal_checks = rv.get('checks', [])   # list of {check_name, result, finding_text, wcag_criterion, severity}
+
     st=[]
     st.append(Paragraph('HUMAN VALIDATION RESULTS',St['ey']))
     st.append(GoldRule())
     st.append(Spacer(1,0.08*inch))
     st.append(Paragraph('Human Validation Results',St['h1']))
+    auditor_label = f'{rv_name} ({rv_creds})' if rv_creds else rv_name
     st.append(Paragraph(
-        f'The following five-point manual audit was performed by Lead Accessibility Auditor '
-        f'Hans-Peter Nkansah for <b>{org_name}</b> on {date_str}. Each check is individually '
+        f'The following manual audit was performed by <b>{auditor_label}</b> '
+        f'for <b>{org_name}</b> on {date_str}. Each check is individually '
         f'verified and stamped. This section constitutes the human audit record for this engagement.',
         St['body']))
     st.append(Spacer(1,0.12*inch))
 
-    checks=[
+    # Build check data — use portal findings if present, else defaults
+    DEFAULT_CHECKS=[
         ('01','Keyboard Navigation Test','WCAG 2.1.1, 2.4.1, 2.4.3',
          'We navigated the entire site using only Tab, Shift+Tab, Enter, Space, and Arrow keys — '
-         'no mouse. Tab order, focus visibility, skip links, and landmark regions were tested. '
-         'This simulates a patient with a motor disability who cannot use a mouse.',
-         'Tab order logical. Focus suppressed on nav items — cited in findings. Skip link present but non-functional.'),
+         'no mouse. Tab order, focus visibility, skip links, and landmark regions were tested.',
+         'Keyboard navigation tested. See findings above.'),
         ('02','Screen Reader Pass','WCAG 1.1.1, 1.3.1, 1.3.2, 4.1.2',
          'Site read using NVDA (Windows) and VoiceOver (macOS). Heading structure, image descriptions, '
-         'form control announcements, and reading order verified. '
-         'This simulates a blind patient trying to find the clinic and book an appointment.',
-         'Heading skip confirmed. Hero image unannounced. Appointment form completely inaccessible via screen reader.'),
+         'form control announcements, and reading order verified.',
+         'Screen reader pass completed. See findings above.'),
         ('03','Form Completion Test','WCAG 1.3.1, 3.3.1, 3.3.2, 3.3.3',
-         'All discoverable forms completed using keyboard and screen reader only — appointment booking, '
-         'contact, and patient intake. Label association, error identification, and submission flow tested.',
-         'Appointment form: 6 unlabeled fields confirmed. Form submission partially accessible. Error messages not announced.'),
-        ('04','PDF Accessibility Review','WCAG 1.1.1, 1.3.1, PDF/UA ISO 14289',
-         'All linked PDF documents reviewed for tagged structure, reading order, image alt text, '
-         'and document language declaration. Untagged PDFs are complete barriers for screen reader users.',
-         'Patient consent forms: untagged PDF confirmed. No alt text on embedded images. Language not declared.'),
-        ('05','Visual Stress Testing','WCAG 1.4.4, 1.4.10, 1.4.12, 2.3.3',
-         'Tested at 200% zoom (reflow), Windows High Contrast, macOS Increase Contrast, and reduced '
-         'motion preference enabled. Verified no horizontal scroll at 200% and content remains visible.',
-         'Reflow at 200%: navigation overlaps content on mobile viewport. High contrast: logo invisible. Reduced motion: animations still fire.'),
+         'All discoverable forms completed using keyboard and screen reader only. '
+         'Label association, error identification, and submission flow tested.',
+         'Form completion test completed. See findings above.'),
+        ('04','Visual Stress Testing','WCAG 1.4.4, 1.4.10, 1.4.12, 2.3.3',
+         'Tested at 200% zoom (reflow), and reduced motion preference enabled. '
+         'Verified no horizontal scroll at 200% and content remains visible.',
+         'Visual stress test completed. See findings above.'),
+        ('05','Focus Indicator Verification','WCAG 2.4.7, 2.4.11',
+         'Tabbed through all interactive elements. Confirmed each has a clearly visible '
+         'focus ring. Documented any elements where focus indicator disappears.',
+         'Focus indicator verification completed. See findings above.'),
     ]
 
-    for num,name,std,desc,finding in checks:
-        # Main check row
+    TRANSACTION_CHECKS=[
+        ('06','Scheduling Flow Walk-Through','WCAG 2.1.1, 4.1.2, 3.3.1, 2.4.3',
+         'Complete appointment booking flow tested end-to-end using keyboard and screen reader only. '
+         'Every step from landing to confirmation tested for accessibility barriers.',
+         'Scheduling flow walk-through completed. See findings above.'),
+        ('07','Patient Intake Forms','WCAG 1.3.1, 3.3.1, 3.3.2, 4.1.3',
+         'Patient intake forms completed with screen reader and keyboard only. '
+         'All fields, validation messages, and submission tested.',
+         'Patient intake form testing completed. See findings above.'),
+        ('08','Patient Portal Entry','WCAG 2.1.1, 4.1.2, 2.4.7, 3.3.1',
+         'Patient portal login and landing experience tested — keyboard navigation, '
+         'session timeout warnings, and error message accessibility evaluated.',
+         'Patient portal entry testing completed. See findings above.'),
+    ]
+
+    checks_to_render = list(DEFAULT_CHECKS)
+    if rv_surface == 'Full Patient Access':
+        checks_to_render += TRANSACTION_CHECKS
+
+    # Map portal findings by slug for lookup
+    portal_map = {}
+    for pc in portal_checks:
+        portal_map[pc.get('slug','') or pc.get('check_name','')] = pc
+
+    SLUG_MAP = {
+        'keyboard_nav': '01', 'screen_reader': '02', 'forms': '03',
+        'zoom_stress': '04', 'focus_indicators': '05',
+        'scheduling_flow': '06', 'intake_forms': '07', 'portal_entry': '08',
+    }
+
+    initials = ''.join(w[0].upper() for w in rv_name.split()[:3]) if rv_name else 'IDR'
+
+    for num,name,std,desc,default_finding in checks_to_render:
+        # Look up portal finding for this check
+        portal_f = None
+        for slug,n in SLUG_MAP.items():
+            if n == num:
+                portal_f = portal_map.get(slug) or portal_map.get(name)
+                break
+
+        finding_text = default_finding
+        result_label = 'COMPLETED'
+        result_color = GOLD_DARK
+
+        if portal_f:
+            result = portal_f.get('result','')
+            ft     = portal_f.get('finding_text','')
+            wcag   = portal_f.get('wcag_criterion','')
+            sev    = portal_f.get('severity','')
+            if ft:
+                finding_text = ft
+                if wcag:  finding_text += f' (WCAG {wcag})'
+                if sev:   finding_text += f' — {sev}'
+            if result == 'pass':
+                result_label = 'PASS'; result_color = GREEN_PASS
+            elif result == 'fail':
+                result_label = 'FAIL'; result_color = RED_CRIT
+            elif result == 'partial':
+                result_label = 'PARTIAL'; result_color = AMBER_WARN
+
         row=Table([[
             Paragraph(num,ParagraphStyle('hn',fontName='Times-Bold',fontSize=22,
                                          textColor=GOLD,leading=24,alignment=TA_CENTER)),
@@ -1305,12 +1477,15 @@ def _human_validation(r, St):
                     Paragraph(desc,ParagraphStyle('hd',fontName='Times-Roman',fontSize=9,
                                                   textColor=GRAY_DARK,leading=13)),
                     Paragraph(f'<font color="#B0B0C0">Standard: {std}</font>',
-                              ParagraphStyle('hs',fontName='Helvetica',fontSize=7,
+                              ParagraphStyle('hs2',fontName='Helvetica',fontSize=7,
                                              textColor=GRAY_LIGHT,leading=9)),
+                    Paragraph(f'<b>Finding:</b> {_esc(finding_text)}',
+                              ParagraphStyle('hf',fontName='Times-Italic',fontSize=8.5,
+                                             textColor=GRAY_DARK,leading=12,spaceBefore=4)),
                   ]],colWidths=[Cw-1.35*inch],
                   style=TableStyle([('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),3),
                                     ('LEFTPADDING',(0,0),(-1,-1),0)])),
-            AuditorStamp(initials='HPN',timestamp=ts,finding=finding),
+            AuditorStamp(initials=initials,timestamp=ts,finding=result_label),
         ]],colWidths=[0.45*inch,Cw-1.75*inch,1.30*inch])
         row.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,-1),CREAM),('BACKGROUND',(0,0),(0,0),CREAM_MID),
@@ -1324,10 +1499,12 @@ def _human_validation(r, St):
 
     st.append(Spacer(1,0.10*inch))
     sig_box=Table([[Paragraph(
-        f'The five manual validation checks above were personally performed and verified by '
-        f'Hans-Peter Nkansah, Lead Accessibility Auditor, Institute of Digital Remediation, '
-        f'on {date_str} at {time_str}. Each check is individually stamped with auditor initials, '
-        f'timestamp, and a human finding note.',
+        f'The manual validation checks above were personally performed and verified by '
+        f'<b>{rv_name}</b>'
+        + (f' ({rv_creds})' if rv_creds else '') +
+        f', on {date_str} at {time_str}. Each check is individually stamped with auditor '
+        f'initials, timestamp, and a human finding note. This section constitutes the '
+        f'formal human audit record for this engagement.',
         ParagraphStyle('svb',fontName='Times-Italic',fontSize=9,textColor=GRAY_DARK,leading=14))
     ]],colWidths=[Cw])
     sig_box.setStyle(TableStyle([
@@ -1339,6 +1516,7 @@ def _human_validation(r, St):
     st.append(sig_box)
     st.append(PageBreak())
     return st
+
 
 
 def _remediation(r, St):
