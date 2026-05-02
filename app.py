@@ -2499,6 +2499,132 @@ def reviewer_submit(audit_id):
 
 
 
+
+
+@app.route('/api/hhs/audit-job-by-domain/<path:domain>', methods=['GET'])
+def hhs_audit_job_by_domain(domain):
+    """Delivery console checks if reviewer findings exist for a domain."""
+    domain = domain.lower().strip().replace('https://','').replace('http://','').replace('www.','').split('/')[0]
+    try:
+        conn = get_conn()
+        if not conn:
+            return jsonify({'found': False}), 200
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, status, audit_surface,
+                       reviewer_name_submitted, reviewer_submitted_at
+                FROM hhs_audits
+                WHERE domain = %s
+                ORDER BY created_at DESC LIMIT 1
+            """, (domain,))
+            row = cur.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({'found': False, 'domain': domain}), 200
+        return jsonify({
+            'found':                  True,
+            'audit_id':               row[0],
+            'status':                 row[1],
+            'audit_surface':          row[2],
+            'reviewer_name_submitted': row[3] or '',
+            'domain':                 domain,
+        }), 200
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'found': False}), 200
+
+
+@app.route('/api/hhs/audit-job/<int:audit_id>', methods=['GET'])
+def hhs_audit_job_detail(audit_id):
+    """Delivery console fetches full job details including reviewer findings."""
+    # Light admin check via header
+    admin_key = request.headers.get('X-Admin-Key', '').strip()
+    if admin_key and admin_key != ADMIN_KEY:
+        return _error('Unauthorized', 401)
+    try:
+        conn = get_conn()
+        if not conn:
+            return _error('DB unavailable', 503)
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, domain, registry_id, client_email, audit_surface,
+                       org_name, org_contact, org_title, org_phone, org_address,
+                       scan_json, status,
+                       reviewer_name_submitted, reviewer_credentials_submitted,
+                       reviewer_cred_number_submitted,
+                       reviewer_session_start, reviewer_session_end,
+                       reviewer_submitted_at
+                FROM hhs_audits WHERE id = %s
+            """, (audit_id,))
+            job = cur.fetchone()
+            if not job:
+                conn.close()
+                return _error('Job not found', 404)
+
+            cur.execute("""
+                SELECT f.check_slug, f.check_name, f.result, f.finding_text,
+                       f.wcag_criterion, f.severity, f.screenshot_count,
+                       COALESCE(
+                           json_agg(
+                               json_build_object(
+                                   'screenshot_id', s.id,
+                                   'filename', s.filename
+                               )
+                           ) FILTER (WHERE s.id IS NOT NULL),
+                           '[]'
+                       ) AS screenshots
+                FROM hhs_reviewer_findings f
+                LEFT JOIN hhs_reviewer_screenshots s ON s.finding_id = f.id
+                WHERE f.audit_id = %s
+                GROUP BY f.id, f.check_slug, f.check_name, f.result,
+                         f.finding_text, f.wcag_criterion, f.severity, f.screenshot_count
+                ORDER BY f.id
+            """, (audit_id,))
+            findings = cur.fetchall()
+        conn.close()
+
+        surface = job[4]
+        surface_label = 'Full Patient Access' if surface == 'primary_and_transaction' else 'Primary Web Presence'
+
+        checks = []
+        for f in findings:
+            checks.append({
+                'slug':             f[0],
+                'check_name':       f[1],
+                'result':           f[2],
+                'finding_text':     f[3] or '',
+                'wcag_criterion':   f[4] or '',
+                'severity':         f[5] or '',
+                'screenshot_count': f[6] or 0,
+                'screenshots':      f[7] or [],
+            })
+
+        return jsonify({
+            'audit_id':      job[0],
+            'domain':        job[1],
+            'registry_id':   job[2],
+            'client_email':  job[3],
+            'audit_surface': surface,
+            'surface_label': surface_label,
+            'org_name':      job[5] or '',
+            'org_contact':   job[6] or '',
+            'org_title':     job[7] or '',
+            'org_phone':     job[8] or '',
+            'org_address':   job[9] or '',
+            'scan_json':     job[10],
+            'status':        job[11],
+            'reviewer_name_submitted':        job[12] or '',
+            'reviewer_credentials_submitted': job[13] or '',
+            'reviewer_cred_number_submitted': job[14] or '',
+            'reviewer_session_start': job[15].isoformat() if job[15] else None,
+            'reviewer_session_end':   job[16].isoformat() if job[16] else None,
+            'reviewer_submitted_at':  job[17].isoformat() if job[17] else None,
+            'checks': checks,
+        }), 200
+    except Exception as e:
+        print(traceback.format_exc())
+        return _error(str(e), 500)
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5050))
     app.run(host='0.0.0.0', port=port, debug=False)
