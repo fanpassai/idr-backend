@@ -1406,7 +1406,7 @@ def stripe_hhs_webhook():
     amount           = session.get('amount_total', 0)
     customer_details = session.get('customer_details', {}) or {}
     email            = customer_details.get('email', '') or ''
-    is_audit         = (amount == 49700)
+    is_audit         = (amount == 49700 or amount == 100)  # 100 = $1 TEST ONLY — remove before launch
     is_full_audit    = (amount == 119700)
     is_monitoring    = (amount == 4900)
 
