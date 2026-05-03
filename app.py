@@ -2134,7 +2134,7 @@ def reviewer_login():
             finally:
                 conn2.close()
 
-        magic_link = f'https://idrshield.com/idr-reviewer?token={raw_token}'
+        magic_link = f'https://idrshield.com/idr-reviewer#token={raw_token}'
 
         try:
             from hhs_emailer import send_reviewer_magic_link
