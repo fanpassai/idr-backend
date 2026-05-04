@@ -725,7 +725,7 @@ def send_hhs_reviewer_delivery(to_email, domain, org_name, surface_label,
         '<p style="font-family:Arial,sans-serif;font-size:10px;font-weight:700;color:#C9A84C;'
         'letter-spacing:0.15em;text-transform:uppercase;margin:0 0 8px;">What This Record Means</p>'
         '<p style="font-family:Georgia,serif;font-size:13px;color:#555;line-height:1.7;margin:0;">'
-        'This document constitutes your organization's documented Good Faith Effort under '
+        'This document constitutes your organization\'s documented Good Faith Effort under '
         'HHS Section 504 and Section 1557. It has been signed by a CPACC-credentialed '
         'accessibility reviewer and sealed with a SHA-256 integrity hash. '
         'It is now registered in the IDR HHS Compliance Registry.</p>'
