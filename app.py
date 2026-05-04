@@ -2122,6 +2122,7 @@ def reviewer_login():
         reviewer_name = reviewer[1]
 
         conn2 = get_conn()
+        print(f'[REVIEWER LOGIN] conn2 available: {conn2 is not None}')
         if conn2:
             try:
                 with conn2.cursor() as cur2:
@@ -2130,8 +2131,15 @@ def reviewer_login():
                         VALUES (%s, %s, NOW() + INTERVAL '2 hours', NOW())
                     """, (reviewer_id, raw_token))
                     conn2.commit()
+                    print(f'[REVIEWER LOGIN] Token stored for reviewer_id={reviewer_id}')
+            except Exception as te:
+                print(f'[REVIEWER LOGIN] Token INSERT error: {te}')
+                import traceback as _tb
+                print(_tb.format_exc())
             finally:
                 conn2.close()
+        else:
+            print(f'[REVIEWER LOGIN] conn2 is None — token NOT stored')
 
         magic_link = f'https://idrshield.com/idr-reviewer/verify/{raw_token}'
 
