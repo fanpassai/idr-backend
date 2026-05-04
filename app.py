@@ -2087,7 +2087,7 @@ def _get_reviewer_from_token(token):
 
 @app.route('/api/reviewer/login', methods=['POST', 'OPTIONS'])
 def reviewer_login():
-    """Reviewer submits email -> system sends magic link."""
+    """Reviewer submits email -> system sends 6-digit PIN."""
     if request.method == 'OPTIONS':
         return '', 200
     try:
@@ -2100,7 +2100,6 @@ def reviewer_login():
         if not conn:
             return _error('DB unavailable', 503)
 
-        reviewer = None
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -2108,53 +2107,35 @@ def reviewer_login():
                     (email,)
                 )
                 reviewer = cur.fetchone()
+                if not reviewer or not reviewer[2]:
+                    print(f'[REVIEWER LOGIN] Unknown or inactive email: {email}')
+                    return jsonify({'sent': True}), 200
+
+                import secrets as _sec
+                reviewer_id   = reviewer[0]
+                reviewer_name = reviewer[1]
+                pin           = str(_sec.randbelow(900000) + 100000)
+
+                cur.execute("""
+                    DELETE FROM reviewer_tokens
+                    WHERE reviewer_id = %s AND is_session = FALSE
+                """, (reviewer_id,))
+                cur.execute("""
+                    INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at)
+                    VALUES (%s, %s, NOW() + INTERVAL '15 minutes', NOW())
+                """, (reviewer_id, pin))
+                conn.commit()
+                print(f'[REVIEWER LOGIN] PIN stored for reviewer_id={reviewer_id}')
         finally:
             conn.close()
 
-        # Always return 200 to prevent email enumeration
-        if not reviewer or not reviewer[2]:
-            print(f'[REVIEWER LOGIN] Unknown or inactive email: {email}')
-            return jsonify({'sent': True}), 200
-
-        import hashlib as _hl, secrets as _sec
-        raw_token   = _sec.token_hex(32)
-        reviewer_id = reviewer[0]
-        reviewer_name = reviewer[1]
-
-        conn2 = get_conn()
-        print(f'[REVIEWER LOGIN] conn2 available: {conn2 is not None}')
-        if conn2:
-            try:
-                with conn2.cursor() as cur2:
-                    # Clear any stale magic link tokens for this reviewer to avoid UNIQUE constraint errors
-                    cur2.execute("""
-                        DELETE FROM reviewer_tokens
-                        WHERE reviewer_id = %s AND is_session = FALSE
-                    """, (reviewer_id,))
-                    cur2.execute("""
-                        INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at)
-                        VALUES (%s, %s, NOW() + INTERVAL '2 hours', NOW())
-                    """, (reviewer_id, raw_token))
-                    conn2.commit()
-                    print(f'[REVIEWER LOGIN] Token stored for reviewer_id={reviewer_id}')
-            except Exception as te:
-                print(f'[REVIEWER LOGIN] Token INSERT error: {te}')
-                import traceback as _tb
-                print(_tb.format_exc())
-            finally:
-                conn2.close()
-        else:
-            print(f'[REVIEWER LOGIN] conn2 is None — token NOT stored')
-
-        magic_link = f'https://idrshield.com/idr-reviewer?token={raw_token}'
-
         try:
-            from hhs_emailer import send_reviewer_magic_link
-            send_reviewer_magic_link(email, reviewer_name, magic_link)
+            from hhs_emailer import send_reviewer_pin
+            send_reviewer_pin(email, reviewer_name, pin)
         except Exception as ex:
             print(f'[REVIEWER LOGIN] Email error: {ex}')
 
-        print(f'[REVIEWER LOGIN] Magic link sent to {email}')
+        print(f'[REVIEWER LOGIN] PIN sent to {email}')
         return jsonify({'sent': True}), 200
 
     except Exception as e:
@@ -2162,13 +2143,21 @@ def reviewer_login():
         return _error(str(e), 500)
 
 
-@app.route('/api/reviewer/verify', methods=['GET'])
+@app.route('/api/reviewer/verify', methods=['GET', 'POST', 'OPTIONS'])
 def reviewer_verify():
-    """Magic link click -> validates token -> returns 30-day session token."""
-    import hashlib as _hl, secrets as _sec
-    raw_token = request.args.get('token', '').strip()
-    if not raw_token:
-        return _error('Token required.', 400)
+    """Reviewer submits PIN -> returns 30-day session token."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    import secrets as _sec
+
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        pin  = str(body.get('pin', '')).strip()
+    else:
+        pin  = request.args.get('pin', '').strip()
+
+    if not pin:
+        return _error('PIN required.', 400)
 
     conn = get_conn()
     if not conn:
@@ -2181,27 +2170,27 @@ def reviewer_verify():
                 FROM reviewer_tokens t
                 JOIN hhs_reviewers r ON r.id = t.reviewer_id
                 WHERE t.token_hash = %s AND t.expires_at > NOW() AND r.active = TRUE
-            """, (raw_token,))
+                  AND t.is_session = FALSE
+            """, (pin,))
             row = cur.fetchone()
 
-        if not row:
-            conn.close()
-            return _error('Token invalid or expired.', 401)
+            if not row:
+                print(f'[REVIEWER VERIFY] Invalid or expired PIN attempt')
+                conn.close()
+                return _error('PIN invalid or expired.', 401)
 
-        reviewer_id = row[0]
-        session_token = _sec.token_hex(32)
+            reviewer_id   = row[0]
+            session_token = _sec.token_hex(32)
 
-        with conn.cursor() as cur2:
-            # Invalidate old magic link token
-            cur2.execute('DELETE FROM reviewer_tokens WHERE token_hash = %s', (raw_token,))
-            # Store session token (30 days)
-            cur2.execute("""
+            cur.execute('DELETE FROM reviewer_tokens WHERE token_hash = %s', (pin,))
+            cur.execute("""
                 INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at, is_session)
                 VALUES (%s, %s, NOW() + INTERVAL '30 days', NOW(), TRUE)
             """, (reviewer_id, session_token))
             conn.commit()
 
         conn.close()
+        print(f'[REVIEWER VERIFY] Session created for reviewer_id={reviewer_id}')
         return jsonify({
             'session_token':     session_token,
             'reviewer_id':       row[0],
