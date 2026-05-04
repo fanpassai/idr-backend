@@ -2432,13 +2432,17 @@ def reviewer_save_finding(audit_id):
         return _error('Unauthorized', 401)
 
     try:
-        body         = request.get_json(silent=True) or {}
-        check_slug   = body.get('check_slug', '').strip()
-        check_name   = body.get('check_name', '').strip()
-        result       = body.get('result', 'pending').strip()
-        finding_text = body.get('finding_text', '').strip()
-        wcag         = body.get('wcag_criterion', '').strip()
-        severity     = body.get('severity', '').strip()
+        body          = request.get_json(silent=True) or {}
+        check_slug    = body.get('check_slug', '').strip()
+        check_name    = body.get('check_name', '').strip()
+        result        = body.get('result', 'pending').strip()
+        finding_text  = body.get('finding_text', '').strip()
+        wcag          = body.get('wcag_criterion', '').strip()
+        severity      = body.get('severity', '').strip()
+        pages_count   = body.get('pages_count', None)
+        pages_visited = body.get('pages_visited', '').strip()
+        pdf_found     = body.get('pdf_found', None)
+        pdf_docs      = body.get('pdf_docs', '').strip()
 
         if not check_slug:
             return _error('check_slug required.', 400)
@@ -2447,19 +2451,34 @@ def reviewer_save_finding(audit_id):
         if not conn:
             return _error('DB unavailable', 503)
         with conn.cursor() as cur:
+            # Add new columns if they don't exist yet
+            cur.execute("""
+                ALTER TABLE hhs_reviewer_findings
+                ADD COLUMN IF NOT EXISTS pages_count INTEGER,
+                ADD COLUMN IF NOT EXISTS pages_visited TEXT,
+                ADD COLUMN IF NOT EXISTS pdf_found BOOLEAN,
+                ADD COLUMN IF NOT EXISTS pdf_docs TEXT
+            """)
             cur.execute("""
                 INSERT INTO hhs_reviewer_findings
                     (audit_id, check_slug, check_name, result, finding_text,
-                     wcag_criterion, severity, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                     wcag_criterion, severity, pages_count, pages_visited,
+                     pdf_found, pdf_docs, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON CONFLICT (audit_id, check_slug) DO UPDATE SET
-                    result        = EXCLUDED.result,
-                    finding_text  = EXCLUDED.finding_text,
+                    result         = EXCLUDED.result,
+                    finding_text   = EXCLUDED.finding_text,
                     wcag_criterion = EXCLUDED.wcag_criterion,
-                    severity      = EXCLUDED.severity,
-                    updated_at    = NOW()
+                    severity       = EXCLUDED.severity,
+                    pages_count    = EXCLUDED.pages_count,
+                    pages_visited  = EXCLUDED.pages_visited,
+                    pdf_found      = EXCLUDED.pdf_found,
+                    pdf_docs       = EXCLUDED.pdf_docs,
+                    updated_at     = NOW()
                 RETURNING id
-            """, (audit_id, check_slug, check_name, result, finding_text, wcag, severity))
+            """, (audit_id, check_slug, check_name, result, finding_text,
+                   wcag, severity, pages_count, pages_visited,
+                   pdf_found, pdf_docs))
             row = cur.fetchone()
             finding_id = row[0] if row else None
             conn.commit()
@@ -2588,6 +2607,17 @@ def reviewer_submit(audit_id):
         reviewer_name        = body.get('reviewer_name', reviewer['name']).strip()
         reviewer_credentials = body.get('reviewer_credentials', reviewer['credential_title']).strip()
         reviewer_cred_number = body.get('reviewer_credential_number', reviewer['credential_number']).strip()
+        reviewer_role        = body.get('reviewer_role', '').strip()
+        reviewer_verify_url  = body.get('reviewer_verify_url', '').strip()
+        cert_signature       = body.get('cert_signature', '').strip()
+        cert_date            = body.get('cert_date', '').strip()
+        total_pages          = body.get('total_pages', '').strip()
+        # Audit setup metadata
+        setup_browser        = body.get('setup_browser', '').strip()
+        setup_os             = body.get('setup_os', '').strip()
+        setup_sr             = body.get('setup_sr', '').strip()
+        setup_sr_version     = body.get('setup_sr_version', '').strip()
+        setup_primary_url    = body.get('setup_primary_url', '').strip()
 
         conn = get_conn()
         if not conn:
@@ -2630,20 +2660,45 @@ def reviewer_submit(audit_id):
                 WHERE id = %s AND reviewer_id = %s
             """, (audit_id, reviewer['id']))
 
-            # Store self-reported credentials for this audit
+            # Store self-reported credentials + audit setup for this audit
             cur.execute("""
                 ALTER TABLE hhs_audits
                 ADD COLUMN IF NOT EXISTS reviewer_name_submitted TEXT,
                 ADD COLUMN IF NOT EXISTS reviewer_credentials_submitted TEXT,
-                ADD COLUMN IF NOT EXISTS reviewer_cred_number_submitted TEXT
+                ADD COLUMN IF NOT EXISTS reviewer_cred_number_submitted TEXT,
+                ADD COLUMN IF NOT EXISTS reviewer_role_submitted TEXT,
+                ADD COLUMN IF NOT EXISTS reviewer_verify_url TEXT,
+                ADD COLUMN IF NOT EXISTS cert_signature TEXT,
+                ADD COLUMN IF NOT EXISTS cert_date TEXT,
+                ADD COLUMN IF NOT EXISTS cert_total_pages TEXT,
+                ADD COLUMN IF NOT EXISTS audit_setup_browser TEXT,
+                ADD COLUMN IF NOT EXISTS audit_setup_os TEXT,
+                ADD COLUMN IF NOT EXISTS audit_setup_sr TEXT,
+                ADD COLUMN IF NOT EXISTS audit_setup_sr_version TEXT,
+                ADD COLUMN IF NOT EXISTS audit_setup_primary_url TEXT
             """)
             cur.execute("""
                 UPDATE hhs_audits SET
                     reviewer_name_submitted        = %s,
                     reviewer_credentials_submitted = %s,
-                    reviewer_cred_number_submitted = %s
+                    reviewer_cred_number_submitted = %s,
+                    reviewer_role_submitted        = %s,
+                    reviewer_verify_url            = %s,
+                    cert_signature                 = %s,
+                    cert_date                      = %s,
+                    cert_total_pages               = %s,
+                    audit_setup_browser            = %s,
+                    audit_setup_os                 = %s,
+                    audit_setup_sr                 = %s,
+                    audit_setup_sr_version         = %s,
+                    audit_setup_primary_url        = %s
                 WHERE id = %s
-            """, (reviewer_name, reviewer_credentials, reviewer_cred_number, audit_id))
+            """, (
+                reviewer_name, reviewer_credentials, reviewer_cred_number,
+                reviewer_role, reviewer_verify_url, cert_signature, cert_date, total_pages,
+                setup_browser, setup_os, setup_sr, setup_sr_version, setup_primary_url,
+                audit_id
+            ))
 
             # Get domain for notification
             cur.execute('SELECT domain FROM hhs_audits WHERE id = %s', (audit_id,))
@@ -2727,7 +2782,11 @@ def hhs_audit_job_detail(audit_id):
                        reviewer_name_submitted, reviewer_credentials_submitted,
                        reviewer_cred_number_submitted,
                        reviewer_session_start, reviewer_session_end,
-                       reviewer_submitted_at
+                       reviewer_submitted_at,
+                       reviewer_role_submitted, reviewer_verify_url,
+                       cert_signature, cert_date, cert_total_pages,
+                       audit_setup_browser, audit_setup_os, audit_setup_sr,
+                       audit_setup_sr_version, audit_setup_primary_url
                 FROM hhs_audits WHERE id = %s
             """, (audit_id,))
             job = cur.fetchone()
@@ -2793,6 +2852,16 @@ def hhs_audit_job_detail(audit_id):
             'reviewer_session_start': job[15].isoformat() if job[15] else None,
             'reviewer_session_end':   job[16].isoformat() if job[16] else None,
             'reviewer_submitted_at':  job[17].isoformat() if job[17] else None,
+            'reviewer_role_submitted':   job[18] or '',
+            'reviewer_verify_url':       job[19] or '',
+            'cert_signature':            job[20] or '',
+            'cert_date':                 job[21] or '',
+            'cert_total_pages':          job[22] or '',
+            'audit_setup_browser':       job[23] or '',
+            'audit_setup_os':            job[24] or '',
+            'audit_setup_sr':            job[25] or '',
+            'audit_setup_sr_version':    job[26] or '',
+            'audit_setup_primary_url':   job[27] or '',
             'checks': checks,
         }), 200
     except Exception as e:
