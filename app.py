@@ -2126,6 +2126,11 @@ def reviewer_login():
         if conn2:
             try:
                 with conn2.cursor() as cur2:
+                    # Clear any stale magic link tokens for this reviewer to avoid UNIQUE constraint errors
+                    cur2.execute("""
+                        DELETE FROM reviewer_tokens
+                        WHERE reviewer_id = %s AND is_session = FALSE
+                    """, (reviewer_id,))
                     cur2.execute("""
                         INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at)
                         VALUES (%s, %s, NOW() + INTERVAL '2 hours', NOW())
