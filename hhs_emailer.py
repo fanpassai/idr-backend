@@ -721,6 +721,39 @@ def send_reviewer_magic_link(email, reviewer_name, magic_link):
     return _send(email, subject, html, from_name='Institute of Digital Remediation')
 
 
+def send_reviewer_pin(email, reviewer_name, pin):
+    """Send 6-digit PIN login code to reviewer."""
+    first   = reviewer_name.split()[0] if reviewer_name else 'there'
+    subject = 'Your IDR Reviewer Portal Login Code'
+    html = (
+        '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#F8F6F1;">'
+        '<div style="max-width:560px;margin:32px auto;background:#FFFFFF;border:1px solid #E8E0D0;">'
+        '<div style="background:#0A0E1A;padding:24px 32px;">'
+        '<p style="font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.2em;'
+        'text-transform:uppercase;color:#C9A84C;margin:0 0 4px;">Institute of Digital Remediation</p>'
+        '<p style="font-family:Georgia,serif;font-size:18px;color:#FFFFFF;margin:0;">Reviewer Portal Access</p>'
+        '</div>'
+        '<div style="padding:40px 32px;text-align:center;">'
+        '<p style="font-family:Georgia,serif;font-size:15px;color:#333;line-height:1.6;text-align:left;">Hi ' + first + ',</p>'
+        '<p style="font-family:Georgia,serif;font-size:15px;color:#555;line-height:1.6;text-align:left;">'
+        'Enter this code on the IDR Reviewer Portal to log in. It expires in 15 minutes.'
+        '</p>'
+        '<div style="margin:32px auto;display:inline-block;background:#F8F6F1;border:2px solid #C9A84C;'
+        'border-radius:8px;padding:24px 48px;">'
+        '<p style="font-family:Courier New,monospace;font-size:42px;font-weight:700;'
+        'letter-spacing:0.15em;color:#0A0E1A;margin:0;">' + pin + '</p>'
+        '</div>'
+        '<p style="font-family:Arial,sans-serif;font-size:11px;color:#AAAAAA;line-height:1.6;text-align:left;margin-top:24px;">'
+        'If you did not request this code, ignore this email.'
+        '</p>'
+        '<p style="font-family:Arial,sans-serif;font-size:10px;color:#CCCCCC;margin-top:16px;text-align:left;">'
+        'Institute of Digital Remediation &middot; Reviewer Access System'
+        '</p>'
+        '</div></div></body></html>'
+    )
+    return _send(email, subject, html, from_name='Institute of Digital Remediation')
+
+
 def send_reviewer_notification(audit_id, domain, audit_surface):
     """Notify reviewer that a new audit job is ready."""
     import os as _os
