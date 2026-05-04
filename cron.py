@@ -304,30 +304,67 @@ def run_hhs_auto_deliver():
                     'screenshots':      f[11] or [],
                 } for f in findings]
 
+                # Build scan object — ensure domain is set
+                raw_scan = audit[9] or {}
+                if isinstance(raw_scan, str):
+                    import json as _j
+                    raw_scan = _j.loads(raw_scan)
+                raw_scan['domain'] = raw_scan.get('domain') or domain
+                raw_scan['url']    = raw_scan.get('url') or f'https://{domain}'
+
+                # Calculate session duration in minutes
+                session_start = audit[23]
+                session_end   = audit[24]
+                session_duration = None
+                if session_start and session_end:
+                    diff = session_end - session_start
+                    session_duration = round(diff.total_seconds() / 60, 1)
+
+                # Build receipt_data in the exact structure the PDF generator expects
                 receipt_data = {
-                    'audit_id':      audit_id, 'domain':        domain,
-                    'registry_id':   audit[10] or '', 'client_email':  client_email,
-                    'audit_surface': surface,  'surface_label': surface_label,
-                    'org_name':      audit[4] or '', 'org_contact':   audit[5] or '',
-                    'org_title':     audit[6] or '', 'org_phone':     audit[7] or '',
-                    'org_address':   audit[8] or '',
-                    'scan':          audit[9] or {},   # automated scan data from healthscan
-                    'reviewer_name_submitted':        audit[11] or '',
-                    'reviewer_credentials_submitted': audit[12] or '',
-                    'reviewer_cred_number_submitted': audit[13] or '',
-                    'reviewer_role_submitted':        audit[14] or '',
-                    'reviewer_verify_url':            audit[15] or '',
-                    'cert_date':                      audit[16] or '',
-                    'cert_total_pages':               audit[17] or '',
-                    'audit_setup_browser':            audit[18] or '',
-                    'audit_setup_os':                 audit[19] or '',
-                    'audit_setup_sr':                 audit[20] or '',
-                    'audit_setup_sr_version':         audit[21] or '',
-                    'audit_setup_primary_url':        audit[22] or '',
-                    'reviewer_session_start': audit[23].isoformat() if audit[23] else None,
-                    'reviewer_session_end':   audit[24].isoformat() if audit[24] else None,
-                    'reviewer_submitted_at':  audit[25].isoformat() if audit[25] else None,
-                    'checks': checks,
+                    # Top-level identifiers
+                    'receipt_id':    '',
+                    'registry_id':   audit[10] or f'IDR-HHS-{domain.upper().replace(".", "-")}',
+                    'timestamp_utc': audit[25].isoformat() if audit[25] else '',
+                    'hash':          'PENDING',
+                    'activated_by':  client_email,
+                    'audit_surface': surface,
+
+                    # Organization block — what the PDF reads
+                    'organization': {
+                        'name':         audit[4] or domain,
+                        'address':      audit[8] or '',
+                        'contact_name': audit[5] or '',
+                        'phone':        audit[7] or '',
+                        'email':        client_email,
+                        'title':        audit[6] or '',
+                    },
+
+                    # Automated scan data
+                    'scan': raw_scan,
+
+                    # Reviewer block — what the PDF certification section reads
+                    'reviewer': {
+                        'name':               audit[11] or 'Hans-Peter Nkansah',
+                        'credentials':        audit[12] or '',
+                        'credential_number':  audit[13] or '',
+                        'role':               audit[14] or '',
+                        'verify_url':         audit[15] or '',
+                        'surface_label':      surface_label,
+                        'session_start':      audit[23].isoformat() if audit[23] else '',
+                        'session_end':        audit[24].isoformat() if audit[24] else '',
+                        'session_duration_minutes': session_duration,
+                        'submitted_at':       audit[25].isoformat() if audit[25] else '',
+                        'cert_date':          audit[16] or '',
+                        'total_pages':        audit[17] or '',
+                        'setup_browser':      audit[18] or '',
+                        'setup_os':           audit[19] or '',
+                        'setup_sr':           audit[20] or '',
+                        'setup_sr_version':   audit[21] or '',
+                        'setup_primary_url':  audit[22] or '',
+                        # Checker findings for the human validation section
+                        'checks': checks,
+                    },
                 }
 
                 # If scan_json is empty or missing pages, run the crawl first
