@@ -2118,7 +2118,6 @@ def reviewer_login():
 
         import hashlib as _hl, secrets as _sec
         raw_token   = _sec.token_hex(32)
-        token_hash  = _hl.sha256(raw_token.encode()).hexdigest()
         reviewer_id = reviewer[0]
         reviewer_name = reviewer[1]
 
@@ -2129,7 +2128,7 @@ def reviewer_login():
                     cur2.execute("""
                         INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at)
                         VALUES (%s, %s, NOW() + INTERVAL '2 hours', NOW())
-                    """, (reviewer_id, token_hash))
+                    """, (reviewer_id, raw_token))
                     conn2.commit()
             finally:
                 conn2.close()
@@ -2158,7 +2157,6 @@ def reviewer_verify():
     if not raw_token:
         return _error('Token required.', 400)
 
-    token_hash = _hl.sha256(raw_token.encode()).hexdigest()
     conn = get_conn()
     if not conn:
         return _error('DB unavailable', 503)
@@ -2170,7 +2168,7 @@ def reviewer_verify():
                 FROM reviewer_tokens t
                 JOIN hhs_reviewers r ON r.id = t.reviewer_id
                 WHERE t.token_hash = %s AND t.expires_at > NOW() AND r.active = TRUE
-            """, (token_hash,))
+            """, (raw_token,))
             row = cur.fetchone()
 
         if not row:
@@ -2179,16 +2177,15 @@ def reviewer_verify():
 
         reviewer_id = row[0]
         session_token = _sec.token_hex(32)
-        session_hash  = _hl.sha256(session_token.encode()).hexdigest()
 
         with conn.cursor() as cur2:
             # Invalidate old magic link token
-            cur2.execute('DELETE FROM reviewer_tokens WHERE token_hash = %s', (token_hash,))
+            cur2.execute('DELETE FROM reviewer_tokens WHERE token_hash = %s', (raw_token,))
             # Store session token (30 days)
             cur2.execute("""
                 INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at, is_session)
                 VALUES (%s, %s, NOW() + INTERVAL '30 days', NOW(), TRUE)
-            """, (reviewer_id, session_hash))
+            """, (reviewer_id, session_token))
             conn.commit()
 
         conn.close()
