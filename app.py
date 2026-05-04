@@ -2181,12 +2181,14 @@ def reviewer_verify():
 
             reviewer_id   = row[0]
             session_token = _sec.token_hex(32)
+            import hashlib as _hl
+            session_token_hash = _hl.sha256(session_token.encode()).hexdigest()
 
             cur.execute('DELETE FROM reviewer_tokens WHERE token_hash = %s', (pin,))
             cur.execute("""
                 INSERT INTO reviewer_tokens (reviewer_id, token_hash, expires_at, created_at, is_session)
                 VALUES (%s, %s, NOW() + INTERVAL '30 days', NOW(), TRUE)
-            """, (reviewer_id, session_token))
+            """, (reviewer_id, session_token_hash))
             conn.commit()
 
         conn.close()
