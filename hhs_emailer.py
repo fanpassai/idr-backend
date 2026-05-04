@@ -29,6 +29,7 @@ FROM_INSTITUTION = 'Institute of Digital Remediation'
 FROM_COMPLIANCE  = 'IDR Compliance Team'
 FROM_SUPPORT     = 'IDR Support'
 FROM_ALERTS      = 'IDR Shield'
+NOTIFY_EMAIL     = os.environ.get('NOTIFY_EMAIL', 'idrshieldhq@gmail.com')
 
 STRIPE_CONT_LINK = os.environ.get('STRIPE_CONT_LINK', 'https://buy.stripe.com/fZu7sK3MTeMI7YJ5hG2sM00')
 VERIFY_BASE      = 'https://idrshield.com/hhs-verify'
