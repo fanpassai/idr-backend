@@ -72,6 +72,171 @@ init_email_queue()
 init_auth_schema()
 start_cron_scheduler()
 
+# ── HHS Auto-Deliver Thread ───────────────────────────────────────────────────
+# Runs every 3 minutes. Finds reviewer_submitted audits older than 3 minutes,
+# generates PDF, emails client, marks delivered. Independent of cron.py.
+def _hhs_auto_deliver_loop():
+    import time as _time
+    _time.sleep(90)  # wait 90s after startup
+    while True:
+        try:
+            conn = get_conn()
+            if not conn:
+                _time.sleep(180)
+                continue
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, domain, client_email, audit_surface,
+                           org_name, org_contact, org_title, org_phone, org_address,
+                           scan_json, registry_id,
+                           reviewer_name_submitted, reviewer_credentials_submitted,
+                           reviewer_cred_number_submitted, reviewer_role_submitted,
+                           reviewer_verify_url, cert_date, cert_total_pages,
+                           audit_setup_browser, audit_setup_os, audit_setup_sr,
+                           audit_setup_sr_version, audit_setup_primary_url,
+                           reviewer_session_start, reviewer_session_end,
+                           reviewer_submitted_at
+                    FROM hhs_audits
+                    WHERE status = 'reviewer_submitted'
+                      AND reviewer_submitted_at <= NOW() - INTERVAL '3 minutes'
+                """)
+                audits = cur.fetchall()
+            conn.close()
+
+            if audits:
+                print(f'[HHS_AUTO_DELIVER] {len(audits)} audit(s) ready')
+
+            for audit in audits:
+                audit_id     = audit[0]
+                domain       = audit[1]
+                client_email = audit[2]
+                surface      = audit[3]
+                try:
+                    # Get findings
+                    conn2 = get_conn()
+                    checks = []
+                    if conn2:
+                        with conn2.cursor() as cur2:
+                            cur2.execute("""
+                                SELECT f.check_slug, f.check_name, f.result, f.finding_text,
+                                       f.wcag_criterion, f.severity, f.screenshot_count,
+                                       COALESCE(f.pages_count,0), COALESCE(f.pages_visited,''),
+                                       f.pdf_found, COALESCE(f.pdf_docs,'')
+                                FROM hhs_reviewer_findings f
+                                WHERE f.audit_id = %s ORDER BY f.id
+                            """, (audit_id,))
+                            for f in cur2.fetchall():
+                                checks.append({
+                                    'slug': f[0], 'check_name': f[1], 'result': f[2],
+                                    'finding_text': f[3] or '', 'wcag_criterion': f[4] or '',
+                                    'severity': f[5] or '', 'screenshot_count': f[6] or 0,
+                                    'pages_count': f[7], 'pages_visited': f[8],
+                                    'pdf_found': f[9], 'pdf_docs': f[10],
+                                })
+                        conn2.close()
+
+                    # Build scan
+                    raw_scan = audit[9] or {}
+                    if isinstance(raw_scan, str):
+                        import json as _j; raw_scan = _j.loads(raw_scan)
+                    raw_scan['domain'] = raw_scan.get('domain') or domain
+                    raw_scan['url']    = raw_scan.get('url') or f'https://{domain}'
+
+                    # Auto-crawl if scan is empty
+                    if not raw_scan.get('categories') or not raw_scan.get('overall_score'):
+                        try:
+                            from hhs_crawler import run_hhs_crawl
+                            raw_scan = run_hhs_crawl(f'https://{domain}', max_pages=15)
+                            raw_scan['domain'] = domain
+                            conn3 = get_conn()
+                            if conn3:
+                                import json as _j
+                                with conn3.cursor() as c3:
+                                    c3.execute('UPDATE hhs_audits SET scan_json=%s WHERE id=%s',
+                                               (_j.dumps(raw_scan), audit_id))
+                                    conn3.commit()
+                                conn3.close()
+                            print(f'[HHS_AUTO_DELIVER] Crawl done: {domain} score={raw_scan.get("overall_score",0)}')
+                        except Exception as ce:
+                            print(f'[HHS_AUTO_DELIVER] Crawl failed: {ce}')
+
+                    surface_label = 'Full Patient Access' if surface == 'primary_and_transaction' else 'Primary Web Presence'
+
+                    # Session duration
+                    session_start = audit[23]; session_end = audit[24]
+                    session_mins = None
+                    if session_start and session_end:
+                        session_mins = round((session_end - session_start).total_seconds() / 60, 1)
+
+                    receipt_data = {
+                        'receipt_id':    '',
+                        'registry_id':   audit[10] or f'IDR-HHS-{domain.upper().replace(".","-")}',
+                        'timestamp_utc': audit[25].isoformat() if audit[25] else '',
+                        'hash':          'PENDING',
+                        'activated_by':  client_email,
+                        'audit_surface': surface,
+                        'organization': {
+                            'name':         audit[4] or domain,
+                            'address':      audit[8] or '',
+                            'contact_name': audit[5] or '',
+                            'phone':        audit[7] or '',
+                            'email':        client_email,
+                            'title':        audit[6] or '',
+                        },
+                        'scan': raw_scan,
+                        'reviewer': {
+                            'name':               audit[11] or 'Hans-Peter Nkansah',
+                            'credentials':        audit[12] or '',
+                            'credential_number':  audit[13] or '',
+                            'role':               audit[14] or '',
+                            'surface_label':      surface_label,
+                            'session_start':      audit[23].isoformat() if audit[23] else '',
+                            'session_end':        audit[24].isoformat() if audit[24] else '',
+                            'session_duration_minutes': session_mins,
+                            'submitted_at':       audit[25].isoformat() if audit[25] else '',
+                            'checks':             checks,
+                        },
+                    }
+
+                    from receipt.hhs_pdf_generator import generate_hhs_pdf
+                    pdf_bytes = generate_hhs_pdf(receipt_data)
+                    print(f'[HHS_AUTO_DELIVER] PDF generated: {len(pdf_bytes):,} bytes')
+
+                    from hhs_emailer import send_hhs_reviewer_delivery
+                    send_hhs_reviewer_delivery(
+                        to_email=client_email, domain=domain,
+                        org_name=audit[4] or domain, surface_label=surface_label,
+                        pdf_bytes=pdf_bytes, audit_id=audit_id,
+                        registry_id=audit[10] or '',
+                    )
+
+                    conn4 = get_conn()
+                    if conn4:
+                        with conn4.cursor() as c4:
+                            c4.execute("""UPDATE hhs_audits SET status='delivered',
+                                delivered_at=NOW(), updated_at=NOW() WHERE id=%s""", (audit_id,))
+                            conn4.commit()
+                        conn4.close()
+
+                    print(f'[HHS_AUTO_DELIVER] audit_id={audit_id} domain={domain} delivered to {client_email}')
+
+                except Exception as inner_e:
+                    import traceback as _tb
+                    print(f'[HHS_AUTO_DELIVER] Error audit_id={audit_id}: {inner_e}')
+                    print(_tb.format_exc())
+
+        except Exception as outer_e:
+            import traceback as _tb
+            print(f'[HHS_AUTO_DELIVER] Outer error: {outer_e}')
+            print(_tb.format_exc())
+
+        _time.sleep(180)  # 3 minutes
+
+import threading as _threading
+_deliver_thread = _threading.Thread(target=_hhs_auto_deliver_loop, daemon=True)
+_deliver_thread.start()
+print('[HHS_AUTO_DELIVER] Auto-deliver thread started — checking every 3 minutes')
+
 
 def _error(message, code):
     return jsonify({"error": message, "status": code}), code
