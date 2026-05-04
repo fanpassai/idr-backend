@@ -2146,7 +2146,7 @@ def reviewer_login():
         else:
             print(f'[REVIEWER LOGIN] conn2 is None — token NOT stored')
 
-        magic_link = f'https://idrshield.com/idr-reviewer/verify/{raw_token}'
+        magic_link = f'https://idrshield.com/idr-reviewer?token={raw_token}'
 
         try:
             from hhs_emailer import send_reviewer_magic_link
