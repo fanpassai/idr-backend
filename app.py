@@ -2072,6 +2072,7 @@ def _get_reviewer_from_token(token):
                 FROM reviewer_tokens t
                 JOIN hhs_reviewers r ON r.id = t.reviewer_id
                 WHERE t.token_hash = %s
+                  AND t.is_session = TRUE
                   AND t.expires_at > NOW()
                   AND r.active = TRUE
             """, (token_hash,))
