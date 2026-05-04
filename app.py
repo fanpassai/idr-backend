@@ -1451,8 +1451,8 @@ def stripe_hhs_webhook():
                         cur_p2.execute("""
                             INSERT INTO hhs_audits
                                 (domain, registry_id, client_email, audit_surface, product_amount,
-                                 status, org_name, org_contact, org_title, org_phone, org_address, created_at, updated_at)
-                            VALUES (%s, %s, %s, 'primary', 49700, 'pending_review', %s, %s, %s, %s, %s, NOW(), NOW())
+                                 status, org_name, org_contact, org_title, org_phone, org_address, reviewer_id, created_at, updated_at)
+                            VALUES (%s, %s, %s, 'primary', 49700, 'pending_review', %s, %s, %s, %s, %s, 1, NOW(), NOW())
                             RETURNING id
                         """, (
                             domain,
@@ -1574,8 +1574,8 @@ def stripe_hhs_webhook():
                         cur3.execute("""
                             INSERT INTO hhs_audits
                                 (domain, registry_id, client_email, audit_surface, product_amount,
-                                 status, org_name, org_contact, org_title, org_phone, org_address, created_at, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, 'pending_review', %s, %s, %s, %s, %s, NOW(), NOW())
+                                 status, org_name, org_contact, org_title, org_phone, org_address, reviewer_id, created_at, updated_at)
+                            VALUES (%s, %s, %s, %s, %s, 'pending_review', %s, %s, %s, %s, %s, 1, NOW(), NOW())
                             RETURNING id
                         """, (
                             domain,
