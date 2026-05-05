@@ -730,6 +730,11 @@ def start_cron_scheduler():
                     run_hhs_monitoring_cycle()
                 except Exception as e:
                     print(f"[HHS_CRON] HHS cycle error: {e}")
+                try:
+                    from icc_worker import run_icc_cycle
+                    run_icc_cycle()
+                except Exception as e:
+                    print(f"[ICC] Worker error: {e}")
 
             tick += 1
             time.sleep(180)  # 3 minutes
