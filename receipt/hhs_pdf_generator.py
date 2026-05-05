@@ -395,12 +395,12 @@ def _cover(r, St, verify_url):
     date_str,time_str=_dt(ts); Cw=W(); sc=_sc(score)
 
     st=[]
-    # ── Top spacer — let it breathe ───────────────────────────────────────────
-    st.append(Spacer(1, 0.32*inch))
+    # ── Top spacer ────────────────────────────────────────────────────────────
+    st.append(Spacer(1, 0.20*inch))
 
     # ── Seal — centered, restrained ───────────────────────────────────────────
     st.append(SealFL(r=34))
-    st.append(Spacer(1, 0.14*inch))
+    st.append(Spacer(1, 0.10*inch))
 
     # ── Institution line ──────────────────────────────────────────────────────
     st.append(Paragraph('INSTITUTE OF DIGITAL REMEDIATION',
@@ -444,19 +444,19 @@ def _cover(r, St, verify_url):
         ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
     ]))
     st.append(label_row)
-    st.append(Spacer(1, 0.28*inch))
+    st.append(Spacer(1, 0.18*inch))
 
     # ── One powerful statement — not a paragraph ──────────────────────────────
     st.append(GoldRule(h=0.5, pt=0, pb=0))
-    st.append(Spacer(1, 0.16*inch))
+    st.append(Spacer(1, 0.12*inch))
     st.append(Paragraph(
         'A documented compliance baseline has been established.',
         ParagraphStyle('stmt', fontName='Times-Italic', fontSize=11.5,
                        textColor=CREAM, leading=17, alignment=TA_CENTER,
                        spaceAfter=0)))
-    st.append(Spacer(1, 0.16*inch))
+    st.append(Spacer(1, 0.12*inch))
     st.append(GoldRule(h=0.5, pt=0, pb=0))
-    st.append(Spacer(1, 0.26*inch))
+    st.append(Spacer(1, 0.18*inch))
 
     # ── Organization name — large and respected ───────────────────────────────
     st.append(Paragraph('PREPARED FOR', ParagraphStyle('pf2',
@@ -470,7 +470,7 @@ def _cover(r, St, verify_url):
     st.append(Paragraph(domain.upper(), ParagraphStyle('dom2',
         fontName='Helvetica', fontSize=8, textColor=GOLD_DARK,
         leading=11, alignment=TA_CENTER, letterSpacing=1.4, spaceAfter=0)))
-    st.append(Spacer(1, 0.26*inch))
+    st.append(Spacer(1, 0.18*inch))
 
     # ── Registry data strip — minimal, monospaced, confident ─────────────────
     scope_text = (
@@ -523,6 +523,15 @@ def _cover(r, St, verify_url):
         ('RIGHTPADDING',  (0,0),(-1,-1), 0),
     ]))
     st.append(bt)
+    st.append(Spacer(1, 0.18*inch))
+    # ── Closing line ──────────────────────────────────────────────────────────
+    st.append(GoldRule(h=0.5, pt=0, pb=0))
+    st.append(Spacer(1, 0.08*inch))
+    st.append(Paragraph(
+        'CONFIDENTIAL  ·  HHS ACCESSIBILITY GOOD FAITH EFFORT RECORD  ·  INSTITUTE OF DIGITAL REMEDIATION',
+        ParagraphStyle('cv_close', fontName='Helvetica-Bold', fontSize=5.5,
+                       textColor=GOLD_DARK, leading=8, alignment=TA_CENTER, letterSpacing=1.2,
+                       spaceAfter=0)))
     st.append(NextPageTemplate('Body'))
     st.append(PageBreak())
     return st
@@ -792,19 +801,21 @@ def _exec_summary(r, St):
     st.append(Spacer(1,0.08*inch))
 
     # Score panel
-    met_rows=[[
-        Paragraph(mk,ParagraphStyle('mk',fontName='Helvetica-Bold',fontSize=6,
-                                    textColor=GRAY_MID,leading=8,letterSpacing=0.6)),
-        Paragraph(f'<b>{mv}</b>',ParagraphStyle('mv',fontName='Courier-Bold',fontSize=9,
-                                                 textColor=mc,leading=11,alignment=TA_RIGHT)),
-    ] for mk,mv,mc in [
-        ('CRITICAL VIOLATIONS',str(crits),RED_CRIT if crits>0 else GREEN_PASS),
-        ('SERIOUS VIOLATIONS',str(serious),AMBER_WARN if serious>0 else GREEN_PASS),
-        ('TOTAL ISSUES',str(total),CHARCOAL),
-        ('AUDIT DATE',date_str,CHARCOAL),
-        ('REGISTRY ID',reg_id,CHARCOAL),
-        ('STANDARD','WCAG 2.1 AA',CHARCOAL),
-    ]]
+    def _met_val(mv, mc, is_id=False):
+        fs = 7 if is_id else 9
+        return Paragraph(f'<b>{mv}</b>',ParagraphStyle('mv',fontName='Courier-Bold',fontSize=fs,
+                                                 textColor=mc,leading=11,alignment=TA_RIGHT,wordWrap='CJK'))
+    def _met_key(mk):
+        return Paragraph(mk,ParagraphStyle('mk',fontName='Helvetica-Bold',fontSize=6,
+                                    textColor=GRAY_MID,leading=8,letterSpacing=0.6))
+    met_rows=[
+        [_met_key('CRITICAL VIOLATIONS'), _met_val(str(crits), RED_CRIT if crits>0 else GREEN_PASS)],
+        [_met_key('SERIOUS VIOLATIONS'),  _met_val(str(serious), AMBER_WARN if serious>0 else GREEN_PASS)],
+        [_met_key('TOTAL ISSUES'),        _met_val(str(total), CHARCOAL)],
+        [_met_key('AUDIT DATE'),          _met_val(date_str, CHARCOAL)],
+        [_met_key('REGISTRY ID'),         _met_val(reg_id, CHARCOAL, is_id=True)],
+        [_met_key('STANDARD'),            _met_val('WCAG 2.1 AA', CHARCOAL)],
+    ]
     met_t=Table(met_rows,colWidths=[2.1*inch,1.6*inch],style=TableStyle([
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
         ('LEFTPADDING',(0,0),(-1,-1),8),('RIGHTPADDING',(0,0),(-1,-1),8),
@@ -1580,28 +1591,28 @@ def _human_validation(r, St):
                 result_label = 'PARTIAL'; result_color = AMBER_WARN
 
         row=Table([[
-            Paragraph(num,ParagraphStyle('hn',fontName='Times-Bold',fontSize=22,
-                                         textColor=GOLD,leading=24,alignment=TA_CENTER)),
+            Paragraph(num,ParagraphStyle('hn',fontName='Times-Bold',fontSize=18,
+                                         textColor=GOLD,leading=22,alignment=TA_CENTER)),
             Table([[Paragraph(f'<b>{name}</b>',ParagraphStyle('hna',fontName='Times-Bold',
                                                                fontSize=11,textColor=NAVY,leading=14)),
-                    Paragraph(desc,ParagraphStyle('hd',fontName='Times-Roman',fontSize=9,
+                    Paragraph(desc,ParagraphStyle('hd',fontName='Times-Roman',fontSize=8.5,
                                                   textColor=GRAY_DARK,leading=13)),
                     Paragraph(f'<font color="#B0B0C0">Standard: {std}</font>',
                               ParagraphStyle('hs2',fontName='Helvetica',fontSize=7,
                                              textColor=GRAY_LIGHT,leading=9)),
                     Paragraph(f'<b>Finding:</b> {_esc(finding_text)}',
                               ParagraphStyle('hf',fontName='Times-Italic',fontSize=8.5,
-                                             textColor=GRAY_DARK,leading=12,spaceBefore=4)),
-                  ]],colWidths=[Cw-1.35*inch],
+                                             textColor=GRAY_DARK,leading=13,spaceBefore=4)),
+                  ]],colWidths=[Cw-1.60*inch],
                   style=TableStyle([('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),3),
                                     ('LEFTPADDING',(0,0),(-1,-1),0)])),
             AuditorStamp(initials=initials,timestamp=ts,finding=result_label),
-        ]],colWidths=[0.45*inch,Cw-1.75*inch,1.30*inch])
+        ]],colWidths=[0.40*inch,Cw-1.60*inch,1.20*inch])
         row.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(-1,-1),CREAM),('BACKGROUND',(0,0),(0,0),CREAM_MID),
             ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),
             ('LEFTPADDING',(0,0),(-1,-1),8),('RIGHTPADDING',(0,0),(-1,-1),8),
-            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
             ('LINEABOVE',(0,0),(-1,0),1.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),0.3,CREAM_DARK),
         ]))
         st.append(row)
