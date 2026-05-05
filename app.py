@@ -50,10 +50,13 @@ from confirmation import run_confirmation_scan
 from webhook import parse_gumroad_payload, verify_gumroad_seller, is_valid_sale
 from kit_integration import on_purchase
 from cron import start_cron_scheduler
+from icc_routes import icc_bp
+from icc_database import init_icc_db
 
 app = Flask(__name__)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['JSON_SORT_KEYS'] = False
+app.register_blueprint(icc_bp)
 
 # ── Rate limiter (in-memory) ──────────────────────────────────────────────────
 limiter = Limiter(
@@ -70,6 +73,7 @@ RECEIPT_STORE = {}
 db_available = init_db()
 init_email_queue()
 init_auth_schema()
+icc_db_available = init_icc_db()
 start_cron_scheduler()
 
 # ── HHS Auto-Deliver Thread ───────────────────────────────────────────────────
