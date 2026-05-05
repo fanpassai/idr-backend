@@ -386,7 +386,7 @@ def KV(rows, c1=1.9*inch, gold=True, dark=False):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _cover(r, St, verify_url):
-    """Cover — full navy bleed, contained in one page guaranteed."""
+    """Cover — Goldman Sachs meets Apple. Score as hero. Maximum white space. Elite certification feel."""
     scan=r.get('scan',{}); domain=scan.get('domain','')
     score=scan.get('overall_score',0); reg_id=r.get('registry_id','')
     rid=r.get('receipt_id',''); ts=r.get('timestamp_utc','')
@@ -395,105 +395,137 @@ def _cover(r, St, verify_url):
     date_str,time_str=_dt(ts); Cw=W(); sc=_sc(score)
 
     st=[]
-    st.append(Spacer(1,0.30*inch))
-    st.append(SealFL(r=42))
-    st.append(Spacer(1,0.13*inch))
-    st.append(Paragraph('INSTITUTE OF DIGITAL REMEDIATION',St['ci']))
-    st.append(Paragraph('HHS Compliance Division  ·  2026',St['csu']))
-    st.append(Spacer(1,0.18*inch))
-    st.append(GoldRule(h=1.0,pt=0,pb=0))
-    st.append(Spacer(1,0.18*inch))
-    st.append(Paragraph('HHS ACCESSIBILITY',St['ctit']))
-    st.append(Paragraph('GOOD FAITH EFFORT RECORD',St['ctit']))
-    st.append(Spacer(1,0.10*inch))
-    st.append(Paragraph(domain.upper(),St['cdom']))
-    st.append(Spacer(1,0.16*inch))
+    # ── Top spacer — let it breathe ───────────────────────────────────────────
+    st.append(Spacer(1, 0.32*inch))
 
-    # Score strip
-    sc_row=[[
+    # ── Seal — centered, restrained ───────────────────────────────────────────
+    st.append(SealFL(r=34))
+    st.append(Spacer(1, 0.14*inch))
+
+    # ── Institution line ──────────────────────────────────────────────────────
+    st.append(Paragraph('INSTITUTE OF DIGITAL REMEDIATION',
+        ParagraphStyle('ci2', fontName='Helvetica-Bold', fontSize=5.5,
+                       textColor=GOLD_DARK, leading=8, alignment=TA_CENTER, letterSpacing=3.2,
+                       spaceAfter=0)))
+    st.append(Spacer(1, 0.04*inch))
+    st.append(GoldRule(h=0.7, pt=0, pb=0))
+    st.append(Spacer(1, 0.28*inch))
+
+    # ── SCORE — the hero. Massive. Impossible to ignore. ─────────────────────
+    score_hero = Table([[
         Paragraph(f'<font color="#{sc.hexval()[2:]}"><b>{score}</b></font>',
-                  ParagraphStyle('csc',fontName='Times-Bold',fontSize=56,
-                                 textColor=sc,leading=58,alignment=TA_CENTER)),
-        Paragraph(f'<font color="#7A7A8A">/ 100</font>',
-                  ParagraphStyle('c100',fontName='Helvetica',fontSize=13,
-                                 textColor=GRAY_MID,leading=15,alignment=TA_LEFT)),
-        Paragraph(f'<font color="#{sc.hexval()[2:]}"><b>{_sl(score)}</b></font>',
-                  ParagraphStyle('csl',fontName='Helvetica-Bold',fontSize=13,
-                                 textColor=sc,leading=15,alignment=TA_RIGHT,letterSpacing=1.0)),
-    ]]
-    sct=Table(sc_row,colWidths=[1.15*inch,0.65*inch,Cw-1.80*inch])
-    sct.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-                              ('TOPPADDING',(0,0),(-1,-1),0),('BOTTOMPADDING',(0,0),(-1,-1),0),
-                              ('LEFTPADDING',(0,0),(-1,-1),0),('RIGHTPADDING',(0,0),(-1,-1),0)]))
-    st.append(sct)
-    st.append(Spacer(1,0.16*inch))
-
-    # Data block — dark on navy
-    notice_text = (
-        '<font name="Helvetica-Bold" size="7" color="#8A6F2E">OFFICIAL RECORD NOTICE</font><br/><br/>'
-        '<font name="Times-Roman" size="8.5" color="#C9A84C">'
-        'This document constitutes a timestamped, human-verified Good Faith Effort Record '
-        'produced by the Institute of Digital Remediation. As of the record timestamp above, '
-        'this organization has formally initiated a documented compliance record under '
-        'Section 504 of the Rehabilitation Act and Section 1557 of the Affordable Care Act.'
-        '</font><br/><br/>'
-        '<font name="Helvetica-Bold" size="7" color="#8A6F2E">THIS RECORD HAS BEEN</font><br/>'
-        '<font name="Times-Roman" size="8" color="#FAF8F4">'
-        '&#x2713; Cryptographically sealed (SHA-256)  ·  '
-        '&#x2713; Registered in the IDR HHS Compliance Registry  ·  '
-        '&#x2713; Issued as a verifiable baseline of accessibility posture'
-        '</font>'
-    )
-    notice_box = Table([[Paragraph(notice_text,
-        ParagraphStyle('nb',fontName='Times-Roman',fontSize=8.5,
-                       textColor=GOLD,leading=14))]],
-        colWidths=[Cw])
-    notice_box.setStyle(TableStyle([
-        ('BACKGROUND',(0,0),(-1,-1),colors.HexColor('#0D1520')),
-        ('TOPPADDING',(0,0),(-1,-1),14),('BOTTOMPADDING',(0,0),(-1,-1),14),
-        ('LEFTPADDING',(0,0),(-1,-1),18),('RIGHTPADDING',(0,0),(-1,-1),18),
-        ('LINEABOVE',(0,0),(-1,0),2.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),2.0,GOLD),
-        ('LINEBEFORE',(0,0),(0,-1),2.0,GOLD),
-        ('BOX',(0,0),(-1,-1),0.5,GOLD_DARK),
+                  ParagraphStyle('sh', fontName='Times-Bold', fontSize=86,
+                                 textColor=sc, leading=88, alignment=TA_CENTER)),
+    ]], colWidths=[Cw])
+    score_hero.setStyle(TableStyle([
+        ('TOPPADDING',    (0,0),(-1,-1), 0),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 0),
+        ('LEFTPADDING',   (0,0),(-1,-1), 0),
     ]))
-    st.append(notice_box)
-    st.append(Spacer(1,0.12*inch))
-    st.append(KV([
-        ('REGISTRY ID',reg_id),
-        ('RECORD DATE',f'{date_str}  ·  {time_str}'),
-        ('RECEIPT ID',rid),
-        ('STANDARD','WCAG 2.1 Level AA  ·  Section 504  ·  Section 1557 ACA'),
-        ('SCOPE', (
-            f'Full Patient Access Audit — Primary website + patient-facing transaction layer. '
-            if r.get('reviewer',{}).get('surface_label','') == 'Full Patient Access'
-            else 'Primary Web Presence — Main public-facing website and directly linked informational pages.'
-        ) + (
-            f' {scan.get("pages_scanned", 1)} page(s) evaluated across the domain.'
-            if scan.get('is_multi_page') else ' Primary homepage evaluated.'
-        )),
-        ('SHA-256',dhash[:36]+'…'),
-        ('PREPARED FOR',org_name),
-    ],c1=1.75*inch,dark=True))
-    st.append(Spacer(1,0.16*inch))
+    st.append(score_hero)
+    st.append(Spacer(1, 0.01*inch))
 
-    # QR + note — compact two-column
-    qr_f=QRFL(verify_url,sz=1.0*inch,cap=f'Verify · {domain}')
-    note=Paragraph(
-        f'This document is the official HHS Accessibility Compliance Audit Record for '
-        f'<b><font color="#C9A84C">{org_name}</font></b>. It is cryptographically sealed, '
-        f'court-admissible, and registered in the IDR HHS Compliance Registry.',
+    # Score label row — /100 left, status right
+    label_row = Table([[
+        Paragraph(
+            f'<font color="#7A7A8A" size="10">/ 100</font>',
+            ParagraphStyle('sl_l', fontName='Helvetica', fontSize=10, textColor=GRAY_MID,
+                           leading=13, alignment=TA_LEFT)),
+        Paragraph(
+            f'<font color="#{sc.hexval()[2:]}"><b>{_sl(score)}</b></font>',
+            ParagraphStyle('sl_r', fontName='Helvetica-Bold', fontSize=10, textColor=sc,
+                           leading=13, alignment=TA_RIGHT, letterSpacing=1.2)),
+    ]], colWidths=[Cw*0.5, Cw*0.5])
+    label_row.setStyle(TableStyle([
+        ('TOPPADDING',    (0,0),(-1,-1), 0),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 0),
+        ('LEFTPADDING',   (0,0),(-1,-1), 0),
+        ('RIGHTPADDING',  (0,0),(-1,-1), 0),
+        ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
+    ]))
+    st.append(label_row)
+    st.append(Spacer(1, 0.28*inch))
+
+    # ── One powerful statement — not a paragraph ──────────────────────────────
+    st.append(GoldRule(h=0.5, pt=0, pb=0))
+    st.append(Spacer(1, 0.16*inch))
+    st.append(Paragraph(
+        'A documented compliance baseline has been established.',
+        ParagraphStyle('stmt', fontName='Times-Italic', fontSize=11.5,
+                       textColor=CREAM, leading=17, alignment=TA_CENTER,
+                       spaceAfter=0)))
+    st.append(Spacer(1, 0.16*inch))
+    st.append(GoldRule(h=0.5, pt=0, pb=0))
+    st.append(Spacer(1, 0.26*inch))
+
+    # ── Organization name — large and respected ───────────────────────────────
+    st.append(Paragraph('PREPARED FOR', ParagraphStyle('pf2',
+        fontName='Helvetica-Bold', fontSize=5.5, textColor=GOLD_DARK,
+        leading=8, alignment=TA_CENTER, letterSpacing=2.8, spaceAfter=0)))
+    st.append(Spacer(1, 0.06*inch))
+    st.append(Paragraph(org_name, ParagraphStyle('org2',
+        fontName='Times-Bold', fontSize=16, textColor=CREAM,
+        leading=20, alignment=TA_CENTER, spaceAfter=0)))
+    st.append(Spacer(1, 0.04*inch))
+    st.append(Paragraph(domain.upper(), ParagraphStyle('dom2',
+        fontName='Helvetica', fontSize=8, textColor=GOLD_DARK,
+        leading=11, alignment=TA_CENTER, letterSpacing=1.4, spaceAfter=0)))
+    st.append(Spacer(1, 0.26*inch))
+
+    # ── Registry data strip — minimal, monospaced, confident ─────────────────
+    scope_text = (
+        'Full Patient Access Audit'
+        if r.get('reviewer', {}).get('surface_label', '') == 'Full Patient Access'
+        else 'Primary Web Presence Audit'
+    )
+    meta_rows = [
+        ('REGISTRY ID',  reg_id),
+        ('RECORD DATE',  f'{date_str}  ·  {time_str}'),
+        ('SCOPE',        scope_text),
+        ('SHA-256',      dhash[:28] + '…'),
+        ('PREPARED FOR', org_name),
+    ]
+    mt = Table([
+        [
+            Paragraph(k, ParagraphStyle('mk2', fontName='Helvetica-Bold', fontSize=6,
+                                         textColor=GOLD_DARK, leading=9, letterSpacing=0.6)),
+            Paragraph(v, ParagraphStyle('mv2', fontName='Courier', fontSize=7.5,
+                                         textColor=CREAM, leading=10)),
+        ]
+        for k, v in meta_rows
+    ], colWidths=[1.55*inch, Cw-1.55*inch])
+    mt.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0),(0,-1), colors.HexColor('#0D1520')),
+        ('BACKGROUND',    (1,0),(1,-1), colors.HexColor('#111827')),
+        ('TOPPADDING',    (0,0),(-1,-1), 6),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 6),
+        ('LEFTPADDING',   (0,0),(-1,-1), 10),
+        ('GRID',          (0,0),(-1,-1), 0.4, colors.HexColor('#2A3A4A')),
+        ('LINEABOVE',     (0,0),(-1, 0), 1.5, GOLD),
+        ('LINEBELOW',     (0,-1),(-1,-1), 1.5, GOLD),
+    ]))
+    st.append(mt)
+    st.append(Spacer(1, 0.18*inch))
+
+    # ── QR + minimal note ────────────────────────────────────────────────────
+    qr_f = QRFL(verify_url, sz=0.88*inch, cap=f'Verify · {domain}')
+    note = Paragraph(
+        f'Cryptographically sealed and registered in the IDR HHS Compliance Registry. '
+        f'This record establishes a documented accessibility baseline under Section 504 '
+        f'and Section 1557 as of the audit date. IDR is not a law firm and this document '
+        f'does not constitute legal advice.',
         St['cnote'])
-    bt=Table([[qr_f,note]],colWidths=[1.15*inch,Cw-1.15*inch])
-    bt.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-                             ('LEFTPADDING',(0,0),(-1,-1),0),
-                             ('LEFTPADDING',(1,0),(1,0),14),
-                             ('RIGHTPADDING',(0,0),(-1,-1),0)]))
+    bt = Table([[qr_f, note]], colWidths=[1.05*inch, Cw-1.05*inch])
+    bt.setStyle(TableStyle([
+        ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
+        ('LEFTPADDING',   (0,0),(-1,-1), 0),
+        ('LEFTPADDING',   (1,0),(1,0),   12),
+        ('RIGHTPADDING',  (0,0),(-1,-1), 0),
+    ]))
     st.append(bt)
     st.append(NextPageTemplate('Body'))
     st.append(PageBreak())
     return st
-
-
 def _record_declaration(r, St):
     scan=r.get('scan',{}); domain=scan.get('domain','')
     score=scan.get('overall_score',0)
