@@ -419,7 +419,7 @@ Generate exactly 5 specific action items for today based on this campaign data:
 Return ONLY a JSON array of 5 strings, each a specific action item. No other text."""
 
         payload = json.dumps({
-            'model': 'claude-sonnet-4-20250514',
+            'model': 'claude-sonnet-4-6',
             'max_tokens': 400,
             'messages': [{'role': 'user', 'content': prompt}]
         }).encode()
