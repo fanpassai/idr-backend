@@ -243,7 +243,11 @@ class QRFL(Flowable):
         self.canv.drawImage(self._img(),0,14,self.sz,self.sz,preserveAspectRatio=True)
         if self.cap:
             self.canv.setFillColor(GRAY_MID); self.canv.setFont('Helvetica',5.5)
-            self.canv.drawCentredString(self.sz/2,2,self.cap)
+            # Clip caption to QR width — never overflow
+            cap = self.cap
+            while self.canv.stringWidth(cap,'Helvetica',5.5) > self.sz and len(cap)>4:
+                cap = cap[:-4]+'…'
+            self.canv.drawCentredString(self.sz/2,2,cap)
 
 class CodeBlock(Flowable):
     def __init__(self, before, after):
@@ -295,39 +299,30 @@ class AuditorStamp(Flowable):
     def __init__(self, initials='HPN', timestamp='', finding=''):
         super().__init__()
         self.initials=initials; self.ts=timestamp; self.finding=finding
-    def wrap(self, aW, aH): self.W=aW; return aW, 54
+    def wrap(self, aW, aH): self.W=aW; return aW, 58
     def draw(self):
-        c=self.canv; rx=self.W-90
-        # Stamp border
+        c=self.canv
+        # Stamp is 86pt wide, centered inside whatever column width we receive
+        sw = min(86, self.W - 4)   # never wider than column
+        rx = (self.W - sw) / 2     # center horizontally — always positive
         c.saveState()
+        # Stamp border
         c.setStrokeColor(GREEN_PASS); c.setLineWidth(1.2)
-        c.roundRect(rx,4,84,46,4,fill=0,stroke=1)
+        c.roundRect(rx, 4, sw, 50, 4, fill=0, stroke=1)
         # AUDITOR VERIFIED label
-        c.setFillColor(GREEN_PASS); c.setFont('Helvetica-Bold',5.5)
-        c.drawCentredString(rx+42,42,'AUDITOR  VERIFIED')
-        # Initials large
-        c.setFont('Times-BoldItalic',18); c.setFillColor(GREEN_PASS); c.setFillAlpha(0.85)
-        c.drawCentredString(rx+42,22,self.initials)
+        c.setFillColor(GREEN_PASS); c.setFont('Helvetica-Bold', 5)
+        c.drawCentredString(rx + sw/2, 46, 'AUDITOR  VERIFIED')
+        # Finding/result label inside stamp
+        if self.finding:
+            c.setFont('Helvetica-Bold', 7.5); c.setFillColor(GREEN_PASS)
+            c.drawCentredString(rx + sw/2, 31, self.finding.upper()[:10])
+        # Initials
+        c.setFont('Times-BoldItalic', 16); c.setFillColor(GREEN_PASS); c.setFillAlpha(0.75)
+        c.drawCentredString(rx + sw/2, 16, self.initials)
         c.setFillAlpha(1.0)
         # Timestamp
-        c.setFont('Courier',5); c.setFillColor(GRAY_MID)
-        c.drawCentredString(rx+42,12,self.ts[:19].replace('T',' ') if self.ts else '')
-        # Finding note left side
-        if self.finding:
-            c.setFont('Times-Italic',7.5); c.setFillColor(GRAY_DARK)
-            # Wrap to ~rx-10 wide
-            words=self.finding.split(); lines=[]; line=''
-            for w in words:
-                test=line+' '+w if line else w
-                if c.stringWidth(test,'Times-Italic',7.5)<rx-12:
-                    line=test
-                else:
-                    if line: lines.append(line)
-                    line=w
-            if line: lines.append(line)
-            y=44-10
-            for l in lines[:4]:
-                c.drawString(0,y,l); y-=10
+        c.setFont('Courier', 4.5); c.setFillColor(GRAY_MID)
+        c.drawCentredString(rx + sw/2, 7, self.ts[:19].replace('T',' ') if self.ts else '')
         c.restoreState()
 
 # ── Style factory ──────────────────────────────────────────────────────────────
@@ -1546,8 +1541,7 @@ def _human_validation(r, St):
     ]
 
     checks_to_render = list(DEFAULT_CHECKS)
-    if rv_surface == 'Full Patient Access':
-        checks_to_render += TRANSACTION_CHECKS
+    # Transaction checks rendered in separate elite section — not here
 
     # Map portal findings by slug for lookup
     portal_map = {}
@@ -1590,30 +1584,49 @@ def _human_validation(r, St):
             elif result == 'partial':
                 result_label = 'PARTIAL'; result_color = AMBER_WARN
 
-        row=Table([[
-            Paragraph(num,ParagraphStyle('hn',fontName='Times-Bold',fontSize=18,
-                                         textColor=GOLD,leading=22,alignment=TA_CENTER)),
-            Table([[Paragraph(f'<b>{name}</b>',ParagraphStyle('hna',fontName='Times-Bold',
-                                                               fontSize=11,textColor=NAVY,leading=14)),
-                    Paragraph(desc,ParagraphStyle('hd',fontName='Times-Roman',fontSize=8.5,
-                                                  textColor=GRAY_DARK,leading=13)),
-                    Paragraph(f'<font color="#B0B0C0">Standard: {std}</font>',
-                              ParagraphStyle('hs2',fontName='Helvetica',fontSize=7,
-                                             textColor=GRAY_LIGHT,leading=9)),
-                    Paragraph(f'<b>Finding:</b> {_esc(finding_text)}',
-                              ParagraphStyle('hf',fontName='Times-Italic',fontSize=8.5,
-                                             textColor=GRAY_DARK,leading=13,spaceBefore=4)),
-                  ]],colWidths=[Cw-1.60*inch],
-                  style=TableStyle([('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),3),
-                                    ('LEFTPADDING',(0,0),(-1,-1),0)])),
-            AuditorStamp(initials=initials,timestamp=ts,finding=result_label),
-        ]],colWidths=[0.40*inch,Cw-1.60*inch,1.20*inch])
+        # Layout: left block (num circle + text) | right block (stamp only)
+        # Stamp column: 1.5 inch = 108pt — stamp draws at 86pt centered inside
+        _stamp_col = 108
+        _left_col  = Cw - _stamp_col
+
+        # Left block: number on top, then check name, desc, finding
+        left_inner = Table([
+            [Paragraph(f'<font color="#C9A84C"><b>{num}</b></font>',
+                       ParagraphStyle('hn2', fontName='Times-Bold', fontSize=15,
+                                      textColor=GOLD, leading=18, alignment=TA_LEFT))],
+            [Paragraph(f'<b>{name}</b>',
+                       ParagraphStyle('hna2', fontName='Times-Bold', fontSize=11,
+                                      textColor=NAVY, leading=14, spaceBefore=2))],
+            [Paragraph(desc,
+                       ParagraphStyle('hd2', fontName='Times-Roman', fontSize=8.5,
+                                      textColor=GRAY_DARK, leading=13, spaceBefore=2))],
+            [Paragraph(f'<font color="#B0B0C0">Standard: {std}</font>',
+                       ParagraphStyle('hs3', fontName='Helvetica', fontSize=7,
+                                      textColor=GRAY_LIGHT, leading=9, spaceBefore=2))],
+            [Paragraph(f'<b>Finding:</b> {_esc(finding_text)}',
+                       ParagraphStyle('hf2', fontName='Times-Italic', fontSize=8.5,
+                                      textColor=GRAY_DARK, leading=13, spaceBefore=4))],
+        ], colWidths=[_left_col - 16])
+        left_inner.setStyle(TableStyle([
+            ('TOPPADDING',    (0,0),(-1,-1), 2),
+            ('BOTTOMPADDING', (0,0),(-1,-1), 2),
+            ('LEFTPADDING',   (0,0),(-1,-1), 0),
+            ('RIGHTPADDING',  (0,0),(-1,-1), 0),
+        ]))
+
+        row = Table([
+            [left_inner, AuditorStamp(initials=initials, timestamp=ts, finding=result_label)],
+        ], colWidths=[_left_col, _stamp_col])
         row.setStyle(TableStyle([
-            ('BACKGROUND',(0,0),(-1,-1),CREAM),('BACKGROUND',(0,0),(0,0),CREAM_MID),
-            ('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),
-            ('LEFTPADDING',(0,0),(-1,-1),8),('RIGHTPADDING',(0,0),(-1,-1),8),
-            ('VALIGN',(0,0),(-1,-1),'TOP'),
-            ('LINEABOVE',(0,0),(-1,0),1.0,GOLD),('LINEBELOW',(0,-1),(-1,-1),0.3,CREAM_DARK),
+            ('BACKGROUND',    (0,0),(-1,-1), CREAM),
+            ('TOPPADDING',    (0,0),(-1,-1), 10),
+            ('BOTTOMPADDING', (0,0),(-1,-1), 10),
+            ('LEFTPADDING',   (0,0),(-1,-1), 12),
+            ('RIGHTPADDING',  (0,0),(-1,-1), 8),
+            ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
+            ('VALIGN',        (0,0),(0,0),   'TOP'),
+            ('LINEABOVE',     (0,0),(-1,0),  1.0, GOLD),
+            ('LINEBELOW',     (0,-1),(-1,-1),0.3, CREAM_DARK),
         ]))
         st.append(row)
         st.append(Spacer(1,0.06*inch))
@@ -1638,6 +1651,355 @@ def _human_validation(r, St):
     st.append(PageBreak())
     return st
 
+
+def _transaction_layer(r, St):
+    """Elite transaction layer section for $1,197 Full Patient Access audit.
+    CEO-grade. Patient-first narrative. Risk panel. Dual certification."""
+    scan=r.get('scan',{}); domain=scan.get('domain','')
+    org=r.get('organization',{}); org_name=org.get('name',domain)
+    ts=r.get('timestamp_utc',''); date_str,time_str=_dt(ts); Cw=W()
+    rv=r.get('reviewer',{})
+    rv_name  = rv.get('name','Hans-Peter Nkansah')
+    rv_creds = rv.get('credentials','CPACC')
+    rv_num   = rv.get('credential_number','')
+    initials = ''.join(w[0].upper() for w in rv_name.split()[:3]) if rv_name else 'IDR'
+    portal_checks = rv.get('checks',[])
+    portal_map = {}
+    for pc in portal_checks:
+        portal_map[pc.get('slug','') or pc.get('check_name','')] = pc
+
+    NAVY2      = colors.HexColor('#0A0E1A')
+    GOLD_LIGHT = colors.HexColor('#E8D5A3')
+    RED_DEEP   = colors.HexColor('#8B1A1A')
+    CREAM_DEEP = colors.HexColor('#F0EDE6')
+
+    st=[]
+
+    # ── ACT DIVIDER — Patient Experience ──────────────────────────────────────
+    st.append(ActDivider('II-B','THE PATIENT EXPERIENCE',
+                         'What happens when your patients actually try to use your systems'))
+    st.append(Spacer(1, 0.18*inch))
+
+    # ── Opening Statement Panel ───────────────────────────────────────────────
+    # Dark full-width panel — sets the human stakes before any findings
+    stmt_inner = Table([
+        [Paragraph('THE STAKES',
+                   ParagraphStyle('tl_ey', fontName='Helvetica-Bold', fontSize=5.5,
+                                  textColor=GOLD_DARK, leading=8, letterSpacing=3.0,
+                                  spaceAfter=6))],
+        [Paragraph(
+            'Every accessibility barrier in your patient-facing systems is a locked door. '
+            'A patient with low vision cannot book an appointment. '
+            'A patient with a motor disability cannot complete your intake form. '
+            'A deaf patient cannot navigate your portal without a screen reader. '
+            'Under Section 1557 of the Affordable Care Act, each of these is not an '
+            'inconvenience — it is a documented civil rights violation.',
+            ParagraphStyle('tl_stmt', fontName='Times-Italic', fontSize=10.5,
+                           textColor=CREAM, leading=17, spaceAfter=0))],
+        [Paragraph(
+            'This section documents what our auditor found when they walked through '
+            f'your patient-facing transaction systems at {domain} as a patient with a disability would.',
+            ParagraphStyle('tl_sub', fontName='Times-Roman', fontSize=9,
+                           textColor=colors.HexColor('#B0A898'), leading=14, spaceBefore=8))],
+    ], colWidths=[Cw - 56])
+    stmt_inner.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0),(-1,-1), NAVY),
+        ('TOPPADDING',    (0,0),(-1,-1), 28),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 28),
+        ('LEFTPADDING',   (0,0),(-1,-1), 28),
+        ('RIGHTPADDING',  (0,0),(-1,-1), 28),
+        ('LINEABOVE',     (0,0),(-1,0),  3, GOLD),
+        ('LINEBELOW',     (0,-1),(-1,-1),3, GOLD),
+    ]))
+    st.append(stmt_inner)
+    st.append(Spacer(1, 0.28*inch))
+
+    # ── Transaction Risk Summary Panel ────────────────────────────────────────
+    st.append(Paragraph('TRANSACTION LAYER RISK SUMMARY',
+                        ParagraphStyle('tl_ey2', fontName='Helvetica-Bold', fontSize=5.5,
+                                       textColor=GOLD_DARK, leading=8, letterSpacing=2.8)))
+    st.append(Spacer(1, 0.08*inch))
+
+    # Three surfaces — each with scenario, what's at stake legally
+    surfaces = [
+        ('APPOINTMENT SCHEDULING',
+         'A patient with a motor disability attempts to book a specialist appointment.',
+         'Failure to provide equal access to appointment systems violates Section 1557. '
+         'OCR investigations frequently originate from scheduling complaints.',
+         'scheduling_flow', '06'),
+        ('PATIENT INTAKE FORMS',
+         'A blind patient attempts to complete pre-visit intake paperwork online.',
+         'Inaccessible intake forms constitute a failure to provide effective communication '
+         'under 45 C.F.R. §84.52 — directly triggering HHS enforcement exposure.',
+         'intake_forms', '07'),
+        ('PATIENT PORTAL ACCESS',
+         'A patient with low vision attempts to log in and review their health records.',
+         'Patient portal accessibility is explicitly addressed in the 2024 HHS final rule. '
+         'Barriers here represent the highest-profile enforcement risk in the regulation.',
+         'portal_entry', '08'),
+    ]
+
+    risk_rows = []
+    for surface_name, scenario, legal_risk, slug, num in surfaces:
+        pf = portal_map.get(slug, {})
+        result = pf.get('result','') if pf else ''
+        if result == 'pass':
+            status_txt = 'ACCESSIBLE'; status_col = GREEN_PASS; risk_level = 'LOW'
+        elif result == 'fail':
+            status_txt = 'BARRIER FOUND'; status_col = RED_CRIT; risk_level = 'HIGH'
+        elif result == 'partial':
+            status_txt = 'PARTIAL BARRIER'; status_col = AMBER_WARN; risk_level = 'ELEVATED'
+        else:
+            status_txt = 'REVIEWED'; status_col = GOLD_DARK; risk_level = 'SEE FINDINGS'
+
+        risk_rows.append([
+            # Surface name + scenario
+            Table([
+                [Paragraph(surface_name,
+                          ParagraphStyle('rs_name', fontName='Helvetica-Bold', fontSize=7,
+                                         textColor=GOLD_DARK, leading=10, letterSpacing=0.8,
+                                         spaceAfter=4))],
+                [Paragraph(f'<i>"{scenario}"</i>',
+                          ParagraphStyle('rs_sc', fontName='Times-Italic', fontSize=8.5,
+                                         textColor=NAVY, leading=13, spaceAfter=6))],
+                [Paragraph(legal_risk,
+                          ParagraphStyle('rs_leg', fontName='Times-Roman', fontSize=8,
+                                         textColor=GRAY_DARK, leading=12))],
+            ], colWidths=[Cw - 160 - 100 - 28]),
+            # Status badge
+            Table([[
+                Paragraph(status_txt,
+                          ParagraphStyle('rs_st', fontName='Helvetica-Bold', fontSize=9,
+                                         textColor=status_col, leading=12, alignment=TA_CENTER)),
+            ]], colWidths=[132]),
+            # Risk level
+            Table([
+                [Paragraph('ENFORCEMENT RISK',
+                          ParagraphStyle('rs_rl', fontName='Helvetica-Bold', fontSize=5,
+                                         textColor=GRAY_MID, leading=7, alignment=TA_CENTER,
+                                         letterSpacing=0.6))],
+                [Paragraph(risk_level,
+                          ParagraphStyle('rs_rv', fontName='Helvetica-Bold', fontSize=10,
+                                         textColor=status_col, leading=13, alignment=TA_CENTER))],
+            ], colWidths=[72]),
+        ])
+
+    _rc1 = Cw - 160 - 100  # desc column
+    _rc2 = 160              # status column  
+    _rc3 = 100              # risk level column
+    risk_t = Table(risk_rows, colWidths=[_rc1, _rc2, _rc3])
+    risk_t.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0),(-1,-1), colors.HexColor('#FAFAF8')),
+        ('BACKGROUND',    (0,0),(0,0),   colors.HexColor('#FAFAF8')),
+        ('TOPPADDING',    (0,0),(-1,-1), 12),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 12),
+        ('LEFTPADDING',   (0,0),(-1,-1), 14),
+        ('RIGHTPADDING',  (0,0),(-1,-1), 14),
+        ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
+        ('GRID',          (0,0),(-1,-1), 0.5, colors.HexColor('#E0DDD8')),
+        ('LINEABOVE',     (0,0),(-1,0),  2.5, NAVY),
+        ('LINEBELOW',     (0,-1),(-1,-1),2.5, GOLD),
+        ('ROWBACKGROUNDS',(0,0),(-1,-1), [colors.HexColor('#FAFAF8'), CREAM]),
+    ]))
+    st.append(risk_t)
+    st.append(PageBreak())
+
+    # ── Three Transaction Check Cards — Patient Journey format ────────────────
+    st.append(Paragraph('PATIENT EXPERIENCE AUDIT — DETAILED FINDINGS',
+                        ParagraphStyle('tl_ey3', fontName='Helvetica-Bold', fontSize=5.5,
+                                       textColor=GOLD_DARK, leading=8, letterSpacing=2.8)))
+    st.append(GoldRule())
+    st.append(Spacer(1, 0.08*inch))
+
+    TRANSACTION_CHECKS = [
+        ('06', 'Appointment Scheduling Flow',
+         'WCAG 2.1.1, 4.1.2, 3.3.1, 2.4.3',
+         'Complete appointment booking flow tested end-to-end using keyboard and screen reader only. '
+         'Every step from landing to confirmation — date selection, form entry, submission, '
+         'and confirmation — was evaluated for accessibility barriers.',
+         'A patient with a motor disability cannot use a mouse. We tested whether they could '
+         'book an appointment using only a keyboard. Every barrier found is a patient turned away.',
+         'scheduling_flow'),
+        ('07', 'Patient Intake Forms',
+         'WCAG 1.3.1, 3.3.1, 3.3.2, 4.1.3',
+         'Patient intake forms completed with screen reader and keyboard only. '
+         'All fields, validation messages, error identification, and submission tested. '
+         'Forms tested include pre-visit paperwork and demographic collection.',
+         'A blind patient relies on a screen reader to complete intake forms. '
+         'An unlabeled field is invisible to them. We documented every form barrier found.',
+         'intake_forms'),
+        ('08', 'Patient Portal Entry & Navigation',
+         'WCAG 2.1.1, 4.1.2, 2.4.7, 3.3.1',
+         'Patient portal login and landing experience tested — keyboard navigation, '
+         'session timeout warnings, error message accessibility, and health record navigation evaluated. '
+         'Tested with screen reader active throughout.',
+         'The patient portal is where patients access their most sensitive health information. '
+         'An inaccessible portal is not a minor inconvenience — it is a documented ACA violation '
+         'under the 2024 HHS final rule.',
+         'portal_entry'),
+    ]
+
+    _stamp_col = 108
+    _left_col  = Cw - _stamp_col
+
+    for num, name, std, desc, patient_framing, slug in TRANSACTION_CHECKS:
+        pf = portal_map.get(slug, {})
+        finding_text = pf.get('finding_text','') if pf else ''
+        result = pf.get('result','') if pf else ''
+        if result == 'pass':
+            result_label = 'PASS'
+        elif result == 'fail':
+            result_label = 'FAIL'
+        elif result == 'partial':
+            result_label = 'PARTIAL'
+        else:
+            result_label = 'REVIEWED'
+        if not finding_text:
+            finding_text = f'{name} completed. See findings above.'
+
+        # Patient framing bar — dark strip above each card
+        framing_bar = Table([
+            [Paragraph('PATIENT SCENARIO',
+                       ParagraphStyle('pf_ey', fontName='Helvetica-Bold', fontSize=5,
+                                      textColor=GOLD_DARK, leading=7, letterSpacing=2.0,
+                                      spaceAfter=3))],
+            [Paragraph(patient_framing,
+                       ParagraphStyle('pf_txt', fontName='Times-Italic', fontSize=9,
+                                      textColor=CREAM, leading=14))],
+        ], colWidths=[Cw - 32])
+        framing_bar.setStyle(TableStyle([
+            ('BACKGROUND',    (0,0),(-1,-1), NAVY),
+            ('TOPPADDING',    (0,0),(-1,-1), 12),
+            ('BOTTOMPADDING', (0,0),(-1,-1), 12),
+            ('LEFTPADDING',   (0,0),(-1,-1), 16),
+            ('RIGHTPADDING',  (0,0),(-1,-1), 16),
+            ('LINEABOVE',     (0,0),(-1,0),  1.5, GOLD),
+        ]))
+        st.append(framing_bar)
+
+        # Check card — findings
+        left_inner = Table([
+            [Paragraph(f'<font color="#C9A84C"><b>{num}</b></font>',
+                       ParagraphStyle('tn2', fontName='Times-Bold', fontSize=15,
+                                      textColor=GOLD, leading=18))],
+            [Paragraph(f'<b>{name}</b>',
+                       ParagraphStyle('tna2', fontName='Times-Bold', fontSize=11,
+                                      textColor=NAVY, leading=14, spaceBefore=2))],
+            [Paragraph(desc,
+                       ParagraphStyle('td2', fontName='Times-Roman', fontSize=8.5,
+                                      textColor=GRAY_DARK, leading=13, spaceBefore=2))],
+            [Paragraph(f'<font color="#B0B0C0">Standard: {std}</font>',
+                       ParagraphStyle('ts3', fontName='Helvetica', fontSize=7,
+                                      textColor=GRAY_LIGHT, leading=9, spaceBefore=2))],
+            [Paragraph(f'<b>Finding:</b> {_esc(finding_text)}',
+                       ParagraphStyle('tf2', fontName='Times-Italic', fontSize=8.5,
+                                      textColor=GRAY_DARK, leading=13, spaceBefore=4))],
+        ], colWidths=[_left_col - 16])
+        left_inner.setStyle(TableStyle([
+            ('TOPPADDING',    (0,0),(-1,-1), 2),
+            ('BOTTOMPADDING', (0,0),(-1,-1), 2),
+            ('LEFTPADDING',   (0,0),(-1,-1), 0),
+            ('RIGHTPADDING',  (0,0),(-1,-1), 0),
+        ]))
+        row = Table([
+            [left_inner, AuditorStamp(initials=initials, timestamp=ts, finding=result_label)],
+        ], colWidths=[_left_col, _stamp_col])
+        row.setStyle(TableStyle([
+            ('BACKGROUND',    (0,0),(-1,-1), CREAM),
+            ('TOPPADDING',    (0,0),(-1,-1), 10),
+            ('BOTTOMPADDING', (0,0),(-1,-1), 10),
+            ('LEFTPADDING',   (0,0),(-1,-1), 12),
+            ('RIGHTPADDING',  (0,0),(-1,-1), 8),
+            ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
+            ('VALIGN',        (0,0),(0,0),   'TOP'),
+            ('LINEBELOW',     (0,-1),(-1,-1),0.3, CREAM_DARK),
+        ]))
+        st.append(row)
+        st.append(Spacer(1, 0.14*inch))
+
+    # ── Dual Certification Block ──────────────────────────────────────────────
+    st.append(Spacer(1, 0.10*inch))
+    st.append(GoldRule(h=1.5))
+    st.append(Spacer(1, 0.14*inch))
+    st.append(Paragraph('DUAL SURFACE CERTIFICATION',
+                        ParagraphStyle('dc_ey', fontName='Helvetica-Bold', fontSize=5.5,
+                                       textColor=GOLD_DARK, leading=8, letterSpacing=3.0)))
+    st.append(Spacer(1, 0.08*inch))
+    st.append(Paragraph(
+        f'This Full Patient Access Audit encompasses two independently certified surfaces: '
+        f'the Primary Web Presence and the Patient-Facing Transaction Layer. '
+        f'Both surfaces were personally evaluated by {rv_name} '
+        + (f'({rv_creds})' if rv_creds else '') +
+        f' on {date_str}. Each certification below constitutes a separate, '
+        f'independent attestation for its respective surface.',
+        ParagraphStyle('dc_body', fontName='Times-Roman', fontSize=9.5,
+                       textColor=GRAY_DARK, leading=15)))
+    st.append(Spacer(1, 0.14*inch))
+
+    # Two certification panels side by side
+    _half_w = int(Cw / 2) - 16
+
+    def _cert_rows(title, checks_desc, surface_num):
+        return [
+            Paragraph(f'SURFACE {surface_num}',
+                      ParagraphStyle(f'cp_s{surface_num}', fontName='Helvetica-Bold', fontSize=5,
+                                     textColor=GOLD_DARK, leading=7, letterSpacing=2.0,
+                                     spaceAfter=4)),
+            Paragraph(title,
+                      ParagraphStyle(f'cp_t{surface_num}', fontName='Times-Bold', fontSize=11,
+                                     textColor=CREAM, leading=14, spaceAfter=6)),
+            Paragraph(checks_desc,
+                      ParagraphStyle(f'cp_d{surface_num}', fontName='Times-Roman', fontSize=8,
+                                     textColor=colors.HexColor('#B0A898'), leading=12,
+                                     spaceAfter=12)),
+            Paragraph(f'<b>{rv_name}</b>',
+                      ParagraphStyle(f'cp_n{surface_num}', fontName='Times-BoldItalic', fontSize=10,
+                                     textColor=GOLD, leading=13, spaceAfter=2)),
+            Paragraph(
+                (f'{rv_creds}' + (f' · No. {rv_num}' if rv_num else '')),
+                ParagraphStyle(f'cp_c{surface_num}', fontName='Helvetica', fontSize=7.5,
+                               textColor=colors.HexColor('#B0A898'), leading=10, spaceAfter=2)),
+            Paragraph(f'Certified: {date_str}',
+                      ParagraphStyle(f'cp_dt{surface_num}', fontName='Courier', fontSize=7,
+                                     textColor=GOLD_DARK, leading=10)),
+        ]
+
+    p1_rows = _cert_rows('Primary Web Presence',
+                         'Checks 01–05: Keyboard navigation, screen reader pass, '
+                         'form completion, visual stress testing, focus indicator verification.',
+                         '01')
+    p2_rows = _cert_rows('Patient Transaction Layer',
+                         'Checks 06–08: Appointment scheduling flow, patient intake forms, '
+                         'patient portal entry and navigation.',
+                         '02')
+
+    # Build as single table — left col | divider | right col
+    cert_rows = [[
+        Table([[r] for r in p1_rows], colWidths=[_half_w]),
+        Table([[r] for r in p2_rows], colWidths=[_half_w]),
+    ]]
+    cert_t = Table(cert_rows, colWidths=[Cw/2, Cw/2])
+    cert_t.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0),(-1,-1), NAVY),
+        ('TOPPADDING',    (0,0),(-1,-1), 22),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 22),
+        ('LEFTPADDING',   (0,0),(-1,-1), 20),
+        ('RIGHTPADDING',  (0,0),(-1,-1), 20),
+        ('VALIGN',        (0,0),(-1,-1), 'TOP'),
+        ('LINEABOVE',     (0,0),(-1,0),  3, GOLD),
+        ('LINEBELOW',     (0,-1),(-1,-1),3, GOLD),
+        ('LINEBEFORE',    (1,0),(1,-1),  0.5, colors.HexColor('#2A3A4A')),
+    ]))
+    st.append(cert_t)
+    st.append(Spacer(1, 0.08*inch))
+    st.append(Paragraph(
+        'Both surface certifications above constitute the complete human validation record '
+        'for this Full Patient Access Audit engagement. This dual certification is unique '
+        'to the IDR Full Patient Access protocol and does not appear in standard audits.',
+        ParagraphStyle('dc_note', fontName='Times-Italic', fontSize=8,
+                       textColor=GRAY_MID, leading=12, alignment=TA_CENTER)))
+    st.append(PageBreak())
+    return st
 
 
 def _remediation(r, St):
@@ -2720,6 +3082,10 @@ def generate_hhs_pdf(receipt_data: dict) -> bytes:
         s += _scan_receipt(r,St)
         for cat in categories: s += _category(cat,St,base_url)
         s += _human_validation(r,St)
+        # Full Patient Access audit — elite transaction layer section
+        rv_surface = r.get('reviewer',{}).get('surface_label','')
+        if rv_surface == 'Full Patient Access':
+            s += _transaction_layer(r,St)
         s += _remediation(r,St)
         s += _remediation_cycle(r,St)
         s += _decision_page(r,St)
@@ -2830,7 +3196,32 @@ if __name__=='__main__':
                 {'name':'ARIA & Links','slug':'aria_links','status':'pass','score':88,
                  'critical_count':0,'serious_count':0,'issues':[]},
             ]
-        }
+        },
+        'reviewer': {
+            'name': 'Archana Kalbhor',
+            'credentials': 'CPACC',
+            'credential_number': 'IAAP-2024-AK-0471',
+            'surface_label': 'Full Patient Access',
+            'audit_surface': 'primary_and_transaction',
+            'session_start': '2026-04-26T16:52:00Z',
+            'session_end':   '2026-04-26T17:37:00Z',
+            'checks': [
+                {'slug':'scheduling_flow','check_name':'Appointment Scheduling Flow',
+                 'result':'fail',
+                 'finding_text':'Patient was unable to complete appointment booking using keyboard only. '
+                                'Date picker requires mouse interaction — no keyboard equivalent. '
+                                'Confirmation step has no screen reader announcement.'},
+                {'slug':'intake_forms','check_name':'Patient Intake Forms',
+                 'result':'partial',
+                 'finding_text':'3 of 7 intake form fields have no programmatic label. '
+                                'Error messages not announced to screen reader. '
+                                'Submission confirmation accessible.'},
+                {'slug':'portal_entry','check_name':'Patient Portal Entry',
+                 'result':'pass',
+                 'finding_text':'Portal login and landing accessible via keyboard and screen reader. '
+                                'Session timeout warning announced. Health record navigation functional.'},
+            ],
+        },
     }
     print('Generating IDR HHS Elite Audit PDF v3...')
     pdf_bytes=generate_hhs_pdf(sample)
