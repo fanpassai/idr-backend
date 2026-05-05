@@ -243,7 +243,7 @@ RULES:
     try:
         import urllib.request as urlreq
         payload = json.dumps({
-            'model': 'claude-sonnet-4-6',
+            'model': 'claude-sonnet-4-20250514',
             'max_tokens': 1000,
             'system': system,
             'messages': [{'role': 'user', 'content': prompt}]
@@ -396,3 +396,80 @@ def icc_playbook():
 def icc_health():
     return jsonify({'status': 'ICC operational',
                     'timestamp': datetime.now(timezone.utc).isoformat()})
+
+
+# ── EMAIL QUEUE ROUTES ────────────────────────────────────────────────────────
+
+@icc_bp.route('/api/queue/stats', methods=['GET'])
+@cross_origin()
+def icc_queue_stats():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import get_queue_stats
+    return jsonify(get_queue_stats())
+
+
+@icc_bp.route('/api/queue/prospects', methods=['GET'])
+@cross_origin()
+def icc_queue_prospects():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import get_pending_emails
+    limit = int(request.args.get('limit', 50))
+    emails = get_pending_emails(limit=limit)
+    for e in emails:
+        for k, v in e.items():
+            if hasattr(v, 'isoformat'): e[k] = v.isoformat()
+    return jsonify({'emails': emails, 'count': len(emails)})
+
+
+@icc_bp.route('/api/queue/associations', methods=['GET'])
+@cross_origin()
+def icc_queue_associations():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import get_pending_association_emails
+    emails = get_pending_association_emails()
+    for e in emails:
+        for k, v in e.items():
+            if hasattr(v, 'isoformat'): e[k] = v.isoformat()
+    return jsonify({'emails': emails, 'count': len(emails)})
+
+
+@icc_bp.route('/api/queue/approve/<int:qid>', methods=['POST'])
+@cross_origin()
+def icc_approve_email(qid):
+    if not _auth(request): return _unauth()
+    body = request.get_json(silent=True) or {}
+    from icc_email_queue import approve_and_send
+    result = approve_and_send(
+        qid,
+        to_email=body.get('to_email', ''),
+        edited_body=body.get('body_text')
+    )
+    return jsonify(result)
+
+
+@icc_bp.route('/api/queue/approve-association/<int:qid>', methods=['POST'])
+@cross_origin()
+def icc_approve_association(qid):
+    if not _auth(request): return _unauth()
+    body = request.get_json(silent=True) or {}
+    from icc_email_queue import approve_and_send_association
+    result = approve_and_send_association(qid, edited_body=body.get('body_text'))
+    return jsonify(result)
+
+
+@icc_bp.route('/api/queue/seed-associations', methods=['POST'])
+@cross_origin()
+def icc_seed_associations():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import queue_association_emails
+    added = queue_association_emails()
+    return jsonify({'success': True, 'added': added})
+
+
+@icc_bp.route('/api/queue/generate', methods=['POST'])
+@cross_origin()
+def icc_generate_queue():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import generate_and_queue_from_prospects
+    added = generate_and_queue_from_prospects(limit=200)
+    return jsonify({'success': True, 'queued': added})
