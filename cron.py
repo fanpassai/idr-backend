@@ -735,6 +735,11 @@ def start_cron_scheduler():
                     run_icc_cycle()
                 except Exception as e:
                     print(f"[ICC] Worker error: {e}")
+                try:
+                    from icc_email_queue import generate_and_queue_from_prospects
+                    generate_and_queue_from_prospects(limit=100)
+                except Exception as e:
+                    print(f"[ICC_QUEUE] Generate error: {e}")
 
             tick += 1
             time.sleep(180)  # 3 minutes
