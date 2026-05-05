@@ -1483,6 +1483,7 @@ def hhs_registry(domain):
             FROM registry
             WHERE domain = %s
               AND hhs_enrolled = TRUE
+              AND record_type = 'client'
         """, (domain,))
         row = cur.fetchone()
         cur.close()
@@ -1571,7 +1572,7 @@ def stripe_hhs_webhook():
     amount           = session.get('amount_total', 0)
     customer_details = session.get('customer_details', {}) or {}
     email            = customer_details.get('email', '') or ''
-    is_audit         = (amount == 49700 or amount == 100)  # 100 = $1 TEST ONLY — remove before launch
+    is_audit         = (amount == 49700)
     is_full_audit    = (amount == 119700)
     is_monitoring    = (amount == 4900)
 
@@ -1589,13 +1590,14 @@ def stripe_hhs_webhook():
             if is_audit:
                 cur.execute("""
                     INSERT INTO registry
-                        (domain, registry_id, status, hhs_enrolled, product_lane, activated_by, created_at, updated_at)
+                        (domain, registry_id, status, hhs_enrolled, product_lane, record_type, activated_by, created_at, updated_at)
                     VALUES
-                        (%s, %s, 'manual_verified', TRUE, 'hhs', %s, NOW(), NOW())
+                        (%s, %s, 'manual_verified', TRUE, 'hhs', 'client', %s, NOW(), NOW())
                     ON CONFLICT (domain) DO UPDATE SET
                         status       = 'manual_verified',
                         hhs_enrolled = TRUE,
                         product_lane = 'hhs',
+                        record_type  = 'client',
                         activated_by = COALESCE(registry.activated_by, EXCLUDED.activated_by),
                         updated_at   = NOW()
                 """, (domain, f'IDR-HHS-{domain.upper().replace(".", "-")}', email))
@@ -1669,13 +1671,14 @@ def stripe_hhs_webhook():
             elif is_monitoring:
                 cur.execute("""
                     INSERT INTO registry
-                        (domain, registry_id, status, hhs_enrolled, product_lane, activated_by, created_at, updated_at)
+                        (domain, registry_id, status, hhs_enrolled, product_lane, record_type, activated_by, created_at, updated_at)
                     VALUES
-                        (%s, %s, 'active', TRUE, 'hhs', %s, NOW(), NOW())
+                        (%s, %s, 'active', TRUE, 'hhs', 'client', %s, NOW(), NOW())
                     ON CONFLICT (domain) DO UPDATE SET
                         status       = 'active',
                         hhs_enrolled = TRUE,
                         product_lane = 'hhs',
+                        record_type  = 'client',
                         updated_at   = NOW()
                 """, (domain, f'IDR-HHS-{domain.upper().replace(".", "-")}', email))
                 conn.commit()
@@ -1706,13 +1709,14 @@ def stripe_hhs_webhook():
                 # ── $1,197 Full Patient Access Audit ──────────────────────────
                 cur.execute("""
                     INSERT INTO registry
-                        (domain, registry_id, status, hhs_enrolled, product_lane, activated_by, created_at, updated_at)
+                        (domain, registry_id, status, hhs_enrolled, product_lane, record_type, activated_by, created_at, updated_at)
                     VALUES
-                        (%s, %s, 'manual_verified', TRUE, 'hhs', %s, NOW(), NOW())
+                        (%s, %s, 'manual_verified', TRUE, 'hhs', 'client', %s, NOW(), NOW())
                     ON CONFLICT (domain) DO UPDATE SET
                         status       = 'manual_verified',
                         hhs_enrolled = TRUE,
                         product_lane = 'hhs',
+                        record_type  = 'client',
                         activated_by = COALESCE(registry.activated_by, EXCLUDED.activated_by),
                         updated_at   = NOW()
                 """, (domain, f'IDR-HHS-{domain.upper().replace(".", "-")}', email))
