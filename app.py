@@ -74,6 +74,12 @@ db_available = init_db()
 init_email_queue()
 init_auth_schema()
 icc_db_available = init_icc_db()
+try:
+    from icc_email_queue import init_email_queue_table, queue_association_emails
+    init_email_queue_table()
+    queue_association_emails()
+except Exception as _eq:
+    print(f'[ICC_QUEUE] Startup init error: {_eq}')
 start_cron_scheduler()
 
 # ── HHS Auto-Deliver Thread ───────────────────────────────────────────────────
