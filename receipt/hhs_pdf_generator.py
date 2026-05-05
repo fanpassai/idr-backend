@@ -418,27 +418,16 @@ def _cover(r, St, verify_url):
         ('LEFTPADDING',   (0,0),(-1,-1), 0),
     ]))
     st.append(score_hero)
-    st.append(Spacer(1, 0.01*inch))
+    st.append(Spacer(1, 0.04*inch))
 
-    # Score label row — /100 left, status right
-    label_row = Table([[
-        Paragraph(
-            f'<font color="#7A7A8A" size="10">/ 100</font>',
-            ParagraphStyle('sl_l', fontName='Helvetica', fontSize=10, textColor=GRAY_MID,
-                           leading=13, alignment=TA_LEFT)),
-        Paragraph(
-            f'<font color="#{sc.hexval()[2:]}"><b>{_sl(score)}</b></font>',
-            ParagraphStyle('sl_r', fontName='Helvetica-Bold', fontSize=10, textColor=sc,
-                           leading=13, alignment=TA_RIGHT, letterSpacing=1.2)),
-    ]], colWidths=[Cw*0.5, Cw*0.5])
-    label_row.setStyle(TableStyle([
-        ('TOPPADDING',    (0,0),(-1,-1), 0),
-        ('BOTTOMPADDING', (0,0),(-1,-1), 0),
-        ('LEFTPADDING',   (0,0),(-1,-1), 0),
-        ('RIGHTPADDING',  (0,0),(-1,-1), 0),
-        ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
-    ]))
-    st.append(label_row)
+    # Score label — single centered line: "62 / 100  ·  WARNING"
+    st.append(Paragraph(
+        f'<font color="#7A7A8A">/ 100</font>'
+        f'<font color="#4A4A5A">  ·  </font>'
+        f'<font color="#{sc.hexval()[2:]}"><b>{_sl(score)}</b></font>',
+        ParagraphStyle('sl_center', fontName='Helvetica-Bold', fontSize=11,
+                       textColor=GRAY_MID, leading=14, alignment=TA_CENTER,
+                       letterSpacing=1.5)))
     st.append(Spacer(1, 0.18*inch))
 
     # ── One powerful statement — not a paragraph ──────────────────────────────
