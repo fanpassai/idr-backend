@@ -264,8 +264,10 @@ def send_daily_briefing():
     assocs   = get_associations()
     not_contacted = [a for a in assocs if a['status'] == 'not_contacted'][:3]
 
-    deadline = datetime(2026, 5, 11, tzinfo=timezone.utc)
-    days     = max(0, (deadline - datetime.now(timezone.utc)).days)
+    from datetime import date as _date
+    _today   = _date.today()
+    _dl_date = _date(2026, 5, 11)
+    days     = max(0, (_dl_date - _today).days)
     date_str = datetime.now(timezone.utc).strftime('%A, %B %d')
 
     # Build to-do list with AI
