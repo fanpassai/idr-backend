@@ -89,15 +89,73 @@ def icc_get_prospect(pid):
 @cross_origin()
 def icc_scan_prospect(pid):
     if not _auth(request): return _unauth()
-    from icc_database import get_prospect_by_id
-    from icc_worker import scan_prospect
-    p = get_prospect_by_id(pid)
-    if not p: return jsonify({'error': 'Not found'}), 404
-    ok = scan_prospect(p)
-    updated = get_prospect_by_id(pid)
-    for k, v in updated.items():
-        if hasattr(v, 'isoformat'): updated[k] = v.isoformat()
-    return jsonify({'success': ok, 'prospect': updated})
+    body = request.get_json(silent=True) or {}
+    website = body.get('website', '')
+    name = body.get('name', '')
+
+    # Try DB first
+    try:
+        from icc_database import get_prospect_by_id, upsert_prospect
+        from icc_worker import scan_prospect
+        p = get_prospect_by_id(pid)
+        if p:
+            ok = scan_prospect(p)
+            updated = get_prospect_by_id(pid)
+            for k, v in updated.items():
+                if hasattr(v, 'isoformat'): updated[k] = v.isoformat()
+            return jsonify({'success': ok, 'prospect': updated})
+    except Exception:
+        pass
+
+    # Fallback: scan the URL directly (works for browser-loaded seed prospects)
+    if not website:
+        return jsonify({'error': 'No website provided'}), 400
+
+    try:
+        import requests as req_lib
+        from urllib.parse import urlparse
+        url = website if website.startswith('http') else f'https://{website}'
+        domain = urlparse(url).netloc or website.replace('https://','').replace('http://','')
+
+        # Call the IDR scanner endpoint
+        backend = 'https://idr-backend-production.up.railway.app'
+        r = req_lib.post(f'{backend}/api/scan',
+            json={'url': url},
+            timeout=30)
+        scan_data = r.json() if r.ok else {}
+
+        score = scan_data.get('score', 0)
+        criticals = scan_data.get('critical_count', 0)
+        total = scan_data.get('total_issues', 0)
+
+        # Save to DB for future use
+        try:
+            from icc_database import upsert_prospect
+            upsert_prospect({
+                'id': pid,
+                'name': name,
+                'website': website,
+                'idr_score': score,
+                'critical_count': criticals,
+                'scanned': True,
+            })
+        except Exception:
+            pass
+
+        return jsonify({
+            'success': True,
+            'prospect': {
+                'id': pid,
+                'name': name,
+                'website': website,
+                'idr_score': score,
+                'critical_count': criticals,
+                'total_issues': total,
+                'scanned': True,
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @icc_bp.route('/api/harvest', methods=['POST'])
