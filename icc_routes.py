@@ -503,3 +503,44 @@ def icc_send_briefing_now():
         return jsonify({'success': True, 'message': 'Morning briefing sent to idrshieldhq@gmail.com'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@icc_bp.route('/api/scanner/visitors', methods=['GET'])
+@cross_origin()
+def icc_scanner_visitors():
+    if not _auth(request): return _unauth()
+    from database import get_conn
+    conn = get_conn()
+    if not conn: return jsonify({'visitors': []})
+    try:
+        with conn.cursor() as cur:
+            # Pull from receipts table - every external scan is a visitor
+            cur.execute("""
+                SELECT DISTINCT ON (domain)
+                    domain,
+                    score,
+                    critical_count,
+                    created_at as scanned_at,
+                    receipt_id
+                FROM receipts
+                WHERE domain IS NOT NULL
+                  AND domain != 'idrshield.com'
+                  AND domain != 'idrshieldhq'
+                ORDER BY domain, created_at DESC
+                LIMIT 100
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = []
+            for r in cur.fetchall():
+                row = dict(zip(cols, r))
+                if row.get('scanned_at'):
+                    row['scanned_at'] = row['scanned_at'].isoformat()
+                rows.append(row)
+        # Sort by most recent
+        rows.sort(key=lambda x: x.get('scanned_at',''), reverse=True)
+        return jsonify({'visitors': rows, 'count': len(rows)})
+    except Exception as e:
+        print(f'[ICC] Scanner visitors error: {e}')
+        return jsonify({'visitors': [], 'error': str(e)})
+    finally:
+        conn.close()
