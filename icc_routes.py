@@ -544,3 +544,70 @@ def icc_scanner_visitors():
         return jsonify({'visitors': [], 'error': str(e)})
     finally:
         conn.close()
+
+
+@icc_bp.route('/api/queue/resend-bounced', methods=['POST'])
+@cross_origin()
+def icc_resend_bounced():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import (generate_association_emails,
+                                  _send_via_sendgrid, _days_left)
+    from database import get_conn
+
+    # Corrected addresses for the 5 bounced associations
+    corrections = {
+        'nachc':      'mking@nachc.org',
+        'mgma':       'memberservices@mgma.com',
+        'ahip':       'info@ahip.org',
+        'ahla':       'info@americanhealthlaw.org',
+        'nahc':       'nahc@nahc.org',
+    }
+
+    sent = []
+    failed = []
+
+    assocs = generate_association_emails()
+    for a in assocs:
+        if a['id'] not in corrections:
+            continue
+        correct_email = corrections[a['id']]
+        try:
+            _send_via_sendgrid(
+                correct_email,
+                a['subject'],
+                a['body'],
+                salutation=a.get('salutation', 'Team'),
+                institutional=True
+            )
+            sent.append({'name': a['name'], 'email': correct_email})
+
+            # Log in DB
+            conn = get_conn()
+            if conn:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            UPDATE icc_association_queue
+                            SET status='sent', contact_email=%s,
+                                approved_at=NOW(), sent_at=NOW()
+                            WHERE assoc_id=%s AND status='pending'
+                        """, (correct_email, a['id']))
+                except Exception:
+                    pass
+                finally:
+                    conn.close()
+
+            # Send confirmation notification
+            try:
+                from icc_email_queue import _send_confirmation_notification
+                _send_confirmation_notification(
+                    a['name'], correct_email, 'Association Pitch (Resend)')
+            except Exception:
+                pass
+
+        except Exception as e:
+            failed.append({'name': a['name'], 'email': correct_email,
+                           'error': str(e)})
+
+    return jsonify({'success': True, 'sent': sent, 'failed': failed,
+                    'sent_count': len(sent)})
