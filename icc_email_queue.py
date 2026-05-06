@@ -174,11 +174,11 @@ Would a member alert be useful for your next communication?"""
             'id': 'nachc',
             'name': 'NACHC — National Association of Community Health Centers',
             'email': 'advocacy@nachc.org',
-            'named_email': 'ampearskelly@nachc.org',
-            'named_contact': 'Amanda Pears Kelly',
-            'named_title': 'CEO, NACHC',
+            'named_email': 'krhee@nachc.org',
+            'named_contact': 'Dr. Kyu Rhee',
+            'named_title': 'President & CEO, NACHC',
             'subject': 'May 11 HHS Section 504 Deadline — Member Alert Opportunity for Health Centers',
-            'salutation': 'Ms. Kelly',
+            'salutation': 'NACHC Policy & Advocacy Team',
             'body': _body('NACHC', 'FQHCs', 'Amanda Pears Kelly', 'CEO',
                 'FQHCs are explicitly named in HHS 89 FR 40066 as covered entities. Every health center website, patient portal, and digital intake tool is subject to this requirement. Your members are among the most directly exposed organizations in the country — and among those with the most to lose if a complaint triggers OCR with nothing documented.')
         },
@@ -190,7 +190,7 @@ Would a member alert be useful for your next communication?"""
             'named_contact': 'Yasmina Vinci',
             'named_title': 'CEO, NHSA',
             'subject': 'May 11 HHS Digital Deadline — Head Start Programs Are Covered',
-            'salutation': 'Ms. Vinci',
+            'salutation': 'NHSA Communications Team',
             'body': _body('NHSA', 'Head Start programs', 'Yasmina Vinci', 'CEO',
                 'Head Start programs receive direct HHS funding and are explicitly covered by the May 11 Section 504 digital accessibility deadline. Most program directors assume this rule applies to hospitals and clinics. It applies equally to every program website, enrollment portal, and digital family resource.')
         },
@@ -198,11 +198,11 @@ Would a member alert be useful for your next communication?"""
             'id': 'ahca',
             'name': 'AHCA — American Health Care Association',
             'email': 'info@ahca.org',
-            'named_email': 'mparkinson@ahcancal.org',
-            'named_contact': 'Mark Parkinson',
-            'named_title': 'President & CEO, AHCA',
+            'named_email': 'cporter@ahcancal.org',
+            'named_contact': 'Clifton J. Porter II',
+            'named_title': 'President & CEO, AHCA/NCAL',
             'subject': 'May 11 HHS Website Accessibility Deadline — Long-Term Care Members',
-            'salutation': 'Mr. Parkinson',
+            'salutation': 'AHCA/NCAL Leadership Team',
             'body': _body('AHCA', 'nursing homes and post-acute facilities', 'Mark Parkinson', 'President & CEO',
                 'Nursing homes and post-acute care facilities are covered entities under HHS 89 FR 40066. The enforcement mechanism is complaint-driven — structurally identical to what your members know from CMS oversight. Every member website, online admissions form, and family portal is subject to WCAG 2.1 AA by May 11.')
         },
@@ -214,7 +214,7 @@ Would a member alert be useful for your next communication?"""
             'named_contact': 'Anders Gilberg',
             'named_title': 'Senior VP, Government Affairs, MGMA',
             'subject': 'May 11 HHS Deadline — Physician Practice Websites Are Covered',
-            'salutation': 'Mr. Gilberg',
+            'salutation': 'MGMA Government Affairs Team',
             'body': _body('MGMA', 'physician practice administrators', 'Anders Gilberg', 'SVP Government Affairs',
                 'Physician practices that accept Medicaid or participate in any HHS-funded program are covered entities under the May 11 HHS Section 504 deadline. This covers their websites, patient portals, and online scheduling systems. MGMA members are the administrators who handle this — and most have not yet been informed their digital presence falls under this requirement.')
         },
@@ -226,7 +226,7 @@ Would a member alert be useful for your next communication?"""
             'named_contact': 'William Dombi',
             'named_title': 'President, NAHC',
             'subject': 'May 11 HHS Digital Deadline — Home Health Agencies Are Covered',
-            'salutation': 'Mr. Dombi',
+            'salutation': 'NAHC Communications Team',
             'body': _body('NAHC', 'home health agencies and hospices', 'William Dombi', 'President',
                 'Home health agencies and hospices receiving Medicare or Medicaid funding are covered entities under the May 11 HHS Section 504 deadline. Every agency website, online intake form, and patient-facing digital tool must meet WCAG 2.1 AA. The agencies most at risk are those with no documented audit record when a patient complaint triggers OCR.')
         },
@@ -238,7 +238,7 @@ Would a member alert be useful for your next communication?"""
             'named_contact': 'Katie Smith Sloan',
             'named_title': 'President & CEO, LeadingAge',
             'subject': 'May 11 HHS Section 504 Deadline — Non-Profit Aging Services Members',
-            'salutation': 'Ms. Smith Sloan',
+            'salutation': 'LeadingAge Policy Team',
             'body': _body('LeadingAge', 'non-profit aging services providers', 'Katie Smith Sloan', 'President & CEO',
                 'LeadingAge members — nursing homes, assisted living, hospice, and home health — are covered entities under the May 11 HHS Section 504 digital accessibility deadline. Many non-profit aging services organizations have the mission commitment but lack the technical documentation OCR looks for when a complaint is filed.')
         },
@@ -395,6 +395,23 @@ def queue_association_emails():
         conn.close()
     return added
 
+
+
+
+def reset_and_reseed_associations():
+    """Clear all pending association emails and reseed with latest copy."""
+    from database import get_conn
+    conn = get_conn()
+    if not conn: return 0
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM icc_association_queue WHERE status = 'pending'")
+            print('[ICC_QUEUE] Cleared pending association emails')
+    except Exception as e:
+        print(f'[ICC_QUEUE] Clear error: {e}')
+    finally:
+        conn.close()
+    return queue_association_emails()
 
 def get_pending_emails(limit=50) -> list:
     from database import get_conn
