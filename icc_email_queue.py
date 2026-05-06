@@ -1,4 +1,193 @@
-"""
+HTML_EMAIL_TEMPLATE = """<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" style="color-scheme:light !important;">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{subject}</title>
+<style>
+:root{{color-scheme:light only;}}
+body{{margin:0;padding:0;background-color:#F4F5F7 !important;-webkit-text-size-adjust:100%;}}
+table{{border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;}}
+@media (prefers-color-scheme:dark){{
+  body,.ew{{background-color:#F4F5F7 !important;}}
+  .hd{{background-color:#0F1E2E !important;}}
+  .sb{{background-color:#1a2e42 !important;}}
+  .bd{{background-color:#FFFFFF !important;}}
+  .ft{{background-color:#0F1E2E !important;}}
+  .ht{{color:#FFFFFF !important;}}
+  .he{{color:#C9A84C !important;}}
+  .bp{{color:#374151 !important;}}
+  .dl{{color:#94A3B8 !important;}}
+  .dv{{color:#C9A84C !important;}}
+  .sn{{color:#0F1E2E !important;}}
+  .st{{color:#64748B !important;}}
+  .sl{{color:#C9A84C !important;}}
+  .fa{{color:#94A3B8 !important;}}
+  .gb{{background-color:#C9A84C !important;color:#0F1E2E !important;}}
+  .ss{{background-color:#F4F5F7 !important;color:#64748B !important;}}
+}}
+</style>
+</head>
+<body bgcolor="#F4F5F7" style="margin:0;padding:0;background-color:#F4F5F7 !important;">
+<table class="ew" width="100%" cellpadding="0" cellspacing="0" border="0"
+  bgcolor="#F4F5F7" style="background-color:#F4F5F7 !important;padding:32px 0;">
+<tr><td align="center" style="padding:0 16px;">
+
+<table width="600" cellpadding="0" cellspacing="0" border="0"
+  style="max-width:600px;width:100%;">
+
+  <!-- HEADER -->
+  <tr>
+    <td class="hd" bgcolor="#0F1E2E"
+      style="background-color:#0F1E2E !important;padding:32px 40px 28px;
+             border-radius:8px 8px 0 0;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td>
+            <p class="he" style="margin:0 0 6px;font-family:Georgia,serif;font-size:11px;
+              letter-spacing:0.18em;color:#C9A84C !important;text-transform:uppercase;">
+              Institute of Digital Remediation
+            </p>
+            <p class="ht" style="margin:0;font-family:Georgia,serif;font-size:24px;
+              font-weight:700;color:#FFFFFF !important;letter-spacing:0.02em;line-height:1.2;">
+              IDR Shield
+            </p>
+          </td>
+          <td align="right" valign="middle">
+            <table cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td class="gb" bgcolor="#C9A84C"
+                  style="background-color:#C9A84C !important;color:#0F1E2E !important;
+                         font-family:Georgia,serif;font-size:10px;font-weight:700;
+                         letter-spacing:0.12em;text-transform:uppercase;
+                         padding:7px 14px;border-radius:3px;">
+                  HHS COMPLIANCE
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- GOLD RULE -->
+  <tr>
+    <td bgcolor="#C9A84C" height="3"
+      style="background-color:#C9A84C !important;height:3px;
+             font-size:3px;line-height:3px;">&nbsp;</td>
+  </tr>
+
+  <!-- DEADLINE BAR -->
+  <tr>
+    <td class="sb" bgcolor="#1a2e42"
+      style="background-color:#1a2e42 !important;padding:13px 40px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td>
+            <span class="dl"
+              style="font-family:Georgia,serif;font-size:11px;color:#94A3B8 !important;
+                     letter-spacing:0.1em;text-transform:uppercase;">
+              Federal Deadline
+            </span>
+          </td>
+          <td align="right">
+            <span class="dv"
+              style="font-family:Georgia,serif;font-size:12px;color:#C9A84C !important;
+                     font-weight:700;letter-spacing:0.04em;">
+              May 11, 2026 &nbsp;|&nbsp; {days_left} days remaining
+            </span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- BODY -->
+  <tr>
+    <td class="bd" bgcolor="#FFFFFF"
+      style="background-color:#FFFFFF !important;padding:40px 40px 8px;
+             border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
+      <p class="sn" style="margin:0 0 28px;font-family:Georgia,serif;font-size:16px;
+        color:#1a2e42 !important;line-height:1.7;font-weight:600;">
+        Dear {salutation},
+      </p>
+      {body_html}
+    </td>
+  </tr>
+
+  <!-- SIGNATURE -->
+  <tr>
+    <td class="bd" bgcolor="#FFFFFF"
+      style="background-color:#FFFFFF !important;padding:8px 40px 40px;
+             border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
+      <table cellpadding="0" cellspacing="0" border="0" width="100%"
+        style="border-top:2px solid #C9A84C;padding-top:24px;margin-top:16px;">
+        <tr>
+          <td valign="top" style="padding-right:16px;">
+            <p class="sn" style="margin:0 0 3px;font-family:Georgia,serif;font-size:16px;
+              font-weight:700;color:#0F1E2E !important;">
+              Hans-Peter Nkansah
+            </p>
+            <p class="st" style="margin:0 0 6px;font-family:Georgia,serif;font-size:12px;
+              color:#64748B !important;letter-spacing:0.03em;">
+              Founder &amp; Director, Institute of Digital Remediation
+            </p>
+            <p style="margin:0 0 4px;font-family:Georgia,serif;font-size:11px;">
+              <a class="sl" href="mailto:{sig_email}"
+                style="color:#C9A84C !important;text-decoration:none;">{sig_email}</a>
+              &nbsp;&nbsp;
+              <a class="sl" href="https://idrshield.com/healthcare"
+                style="color:#C9A84C !important;text-decoration:none;">idrshield.com</a>
+            </p>
+            <p class="st" style="margin:6px 0 0;font-family:Georgia,serif;font-size:11px;
+              color:#94A3B8 !important;">
+              14 E Washington St, Orlando, FL 32801
+            </p>
+          </td>
+          <td align="right" valign="top">
+            <table cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td class="ss" bgcolor="#F4F5F7"
+                  style="background-color:#F4F5F7 !important;border-radius:4px;
+                         padding:10px 14px;font-family:Georgia,serif;font-size:10px;
+                         color:#64748B !important;letter-spacing:0.08em;
+                         text-transform:uppercase;text-align:center;line-height:1.6;">
+                  Independent HHS<br>Audit Records
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td class="ft" bgcolor="#0F1E2E"
+      style="background-color:#0F1E2E !important;padding:20px 40px;
+             border-radius:0 0 8px 8px;">
+      <p class="fa" style="margin:0;font-family:Georgia,serif;font-size:10px;
+        color:#94A3B8 !important;line-height:1.8;text-align:center;">
+        Institute of Digital Remediation &nbsp;|&nbsp;
+        <a href="https://idrshield.com"
+          style="color:#C9A84C !important;text-decoration:none;">idrshield.com</a><br>
+        14 E Washington St, Orlando, FL 32801<br>
+        Sent from
+        <a href="mailto:{sig_email}"
+          style="color:#C9A84C !important;text-decoration:none;">{sig_email}</a>
+      </p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>""""""
 ICC Email Queue System
 Generates personalized outreach emails for every prospect,
 stores them for review, sends approved ones via SendGrid.
@@ -12,7 +201,7 @@ SENDGRID_KEY  = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL      = 'hello@idrshield.com'
 FROM_NAME       = 'Hans-Peter Nkansah, IDR Shield'
 FROM_EMAIL_INST = 'hans-peter@instituteofdigitalremediation.org'
-FROM_NAME_INST  = 'Hans-Peter Nkansah, Institute of Digital Remediation'
+FROM_NAME_INST  = 'Institute of Digital Remediation'
 DEADLINE      = datetime(2026, 5, 11, tzinfo=timezone.utc)
 
 
