@@ -1,68 +1,59 @@
 HTML_EMAIL_TEMPLATE = """<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml" style="color-scheme:light !important;">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta name="color-scheme" content="light">
-<meta name="supported-color-schemes" content="light">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
 <title>{subject}</title>
 <style>
-:root{{color-scheme:light only;}}
-body{{margin:0;padding:0;background-color:#F4F5F7 !important;-webkit-text-size-adjust:100%;}}
-table{{border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;}}
-@media (prefers-color-scheme:dark){{
-  body,.ew{{background-color:#F4F5F7 !important;}}
-  .hd{{background-color:#0F1E2E !important;}}
-  .sb{{background-color:#1a2e42 !important;}}
-  .bd{{background-color:#FFFFFF !important;}}
-  .ft{{background-color:#0F1E2E !important;}}
-  .ht{{color:#FFFFFF !important;}}
-  .he{{color:#C9A84C !important;}}
-  .bp{{color:#374151 !important;}}
-  .dl{{color:#94A3B8 !important;}}
-  .dv{{color:#C9A84C !important;}}
-  .sn{{color:#0F1E2E !important;}}
-  .st{{color:#64748B !important;}}
-  .sl{{color:#C9A84C !important;}}
-  .fa{{color:#94A3B8 !important;}}
-  .gb{{background-color:#C9A84C !important;color:#0F1E2E !important;}}
-  .ss{{background-color:#F4F5F7 !important;color:#64748B !important;}}
-}}
+body{{margin:0;padding:0;font-family:Georgia,'Times New Roman',serif;}}
+table{{border-collapse:collapse;mso-table-lspace:0;mso-table-rspace:0;}}
+a{{text-decoration:none;}}
+p{{margin:0 0 20px;}}
 </style>
 </head>
-<body bgcolor="#F4F5F7" style="margin:0;padding:0;background-color:#F4F5F7 !important;">
-<table class="ew" width="100%" cellpadding="0" cellspacing="0" border="0"
-  bgcolor="#F4F5F7" style="background-color:#F4F5F7 !important;padding:32px 0;">
-<tr><td align="center" style="padding:0 16px;">
+<body bgcolor="#F0EDE6" style="margin:0;padding:0;background-color:#F0EDE6;">
 
-<table width="600" cellpadding="0" cellspacing="0" border="0"
-  style="max-width:600px;width:100%;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0"
+  bgcolor="#F0EDE6" style="background-color:#F0EDE6;padding:40px 0;">
+<tr><td align="center">
+<table width="580" cellpadding="0" cellspacing="0" border="0"
+  style="max-width:580px;width:100%;">
 
-  <!-- HEADER -->
+  <!-- GOLD TOP RULE -->
   <tr>
-    <td class="hd" bgcolor="#0F1E2E"
-      style="background-color:#0F1E2E !important;padding:32px 40px 28px;
-             border-radius:8px 8px 0 0;">
+    <td bgcolor="#C9A84C" height="5"
+      style="background-color:#C9A84C;height:5px;
+             font-size:0;line-height:0;border-radius:4px 4px 0 0;">&nbsp;</td>
+  </tr>
+
+  <!-- HEADER — white so iOS dark mode inverts it to dark naturally -->
+  <tr>
+    <td bgcolor="#FFFFFF"
+      style="background-color:#FFFFFF;padding:28px 40px 24px;
+             border-left:1px solid #E8DCC8;border-right:1px solid #E8DCC8;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <td>
-            <p class="he" style="margin:0 0 6px;font-family:Georgia,serif;font-size:11px;
-              letter-spacing:0.18em;color:#C9A84C !important;text-transform:uppercase;">
+          <td valign="middle">
+            <p style="margin:0 0 4px;font-family:Georgia,serif;font-size:9px;
+              letter-spacing:0.22em;color:#C9A84C;text-transform:uppercase;
+              font-weight:700;">
               Institute of Digital Remediation
             </p>
-            <p class="ht" style="margin:0;font-family:Georgia,serif;font-size:24px;
-              font-weight:700;color:#FFFFFF !important;letter-spacing:0.02em;line-height:1.2;">
+            <p style="margin:0;font-family:Georgia,serif;font-size:26px;
+              font-weight:700;color:#0F1E2E;letter-spacing:0.01em;line-height:1.1;">
               IDR Shield
             </p>
           </td>
           <td align="right" valign="middle">
             <table cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td class="gb" bgcolor="#C9A84C"
-                  style="background-color:#C9A84C !important;color:#0F1E2E !important;
-                         font-family:Georgia,serif;font-size:10px;font-weight:700;
-                         letter-spacing:0.12em;text-transform:uppercase;
-                         padding:7px 14px;border-radius:3px;">
+                <td bgcolor="#0F1E2E"
+                  style="background-color:#0F1E2E;color:#C9A84C;
+                         font-family:Georgia,serif;font-size:9px;font-weight:700;
+                         letter-spacing:0.15em;text-transform:uppercase;
+                         padding:6px 14px;border-radius:2px;">
                   HHS COMPLIANCE
                 </td>
               </tr>
@@ -73,32 +64,20 @@ table{{border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;}}
     </td>
   </tr>
 
-  <!-- GOLD RULE -->
+  <!-- DEADLINE STRIP -->
   <tr>
-    <td bgcolor="#C9A84C" height="3"
-      style="background-color:#C9A84C !important;height:3px;
-             font-size:3px;line-height:3px;">&nbsp;</td>
-  </tr>
-
-  <!-- DEADLINE BAR -->
-  <tr>
-    <td class="sb" bgcolor="#1a2e42"
-      style="background-color:#1a2e42 !important;padding:13px 40px;">
+    <td bgcolor="#0F1E2E"
+      style="background-color:#0F1E2E;padding:11px 40px;">
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <td>
-            <span class="dl"
-              style="font-family:Georgia,serif;font-size:11px;color:#94A3B8 !important;
-                     letter-spacing:0.1em;text-transform:uppercase;">
-              Federal Deadline
-            </span>
+          <td style="font-family:Georgia,serif;font-size:10px;color:#94A3B8;
+            letter-spacing:0.14em;text-transform:uppercase;">
+            Federal Enforcement Deadline
           </td>
-          <td align="right">
-            <span class="dv"
-              style="font-family:Georgia,serif;font-size:12px;color:#C9A84C !important;
-                     font-weight:700;letter-spacing:0.04em;">
-              May 11, 2026 &nbsp;|&nbsp; {days_left} days remaining
-            </span>
+          <td align="right"
+            style="font-family:Georgia,serif;font-size:12px;
+              color:#C9A84C;font-weight:700;letter-spacing:0.03em;">
+            May 11, 2026 &nbsp;|&nbsp; {days_left} days remaining
           </td>
         </tr>
       </table>
@@ -107,55 +86,59 @@ table{{border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;}}
 
   <!-- BODY -->
   <tr>
-    <td class="bd" bgcolor="#FFFFFF"
-      style="background-color:#FFFFFF !important;padding:40px 40px 8px;
-             border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
-      <p class="sn" style="margin:0 0 28px;font-family:Georgia,serif;font-size:16px;
-        color:#1a2e42 !important;line-height:1.7;font-weight:600;">
+    <td bgcolor="#FFFFFF"
+      style="background-color:#FFFFFF;padding:40px 40px 4px;
+             border-left:1px solid #E8DCC8;border-right:1px solid #E8DCC8;">
+      <p style="font-family:Georgia,serif;font-size:16px;color:#0F1E2E;
+        line-height:1.5;font-weight:600;margin:0 0 28px;">
         Dear {salutation},
       </p>
       {body_html}
     </td>
   </tr>
 
-  <!-- SIGNATURE -->
+  <!-- SIGNATURE DIVIDER + SIG -->
   <tr>
-    <td class="bd" bgcolor="#FFFFFF"
-      style="background-color:#FFFFFF !important;padding:8px 40px 40px;
-             border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
-      <table cellpadding="0" cellspacing="0" border="0" width="100%"
-        style="border-top:2px solid #C9A84C;padding-top:24px;margin-top:16px;">
+    <td bgcolor="#FFFFFF"
+      style="background-color:#FFFFFF;padding:0 40px 36px;
+             border-left:1px solid #E8DCC8;border-right:1px solid #E8DCC8;">
+      <!-- Gold rule -->
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+        style="border-top:1px solid #C9A84C;padding-top:24px;margin-top:8px;">
         <tr>
-          <td valign="top" style="padding-right:16px;">
-            <p class="sn" style="margin:0 0 3px;font-family:Georgia,serif;font-size:16px;
-              font-weight:700;color:#0F1E2E !important;">
+          <td valign="top" style="padding-right:20px;">
+            <p style="margin:0 0 2px;font-family:Georgia,serif;font-size:15px;
+              font-weight:700;color:#0F1E2E;">
               Hans-Peter Nkansah
             </p>
-            <p class="st" style="margin:0 0 6px;font-family:Georgia,serif;font-size:12px;
-              color:#64748B !important;letter-spacing:0.03em;">
+            <p style="margin:0 0 10px;font-family:Georgia,serif;font-size:11px;
+              color:#64748B;letter-spacing:0.04em;">
               Founder &amp; Director, Institute of Digital Remediation
             </p>
-            <p style="margin:0 0 4px;font-family:Georgia,serif;font-size:11px;">
-              <a class="sl" href="mailto:{sig_email}"
-                style="color:#C9A84C !important;text-decoration:none;">{sig_email}</a>
-              &nbsp;&nbsp;
-              <a class="sl" href="https://idrshield.com/healthcare"
-                style="color:#C9A84C !important;text-decoration:none;">idrshield.com</a>
+            <p style="margin:0 0 2px;font-family:Georgia,serif;font-size:11px;
+              color:#64748B;">
+              <a href="mailto:{sig_email}"
+                style="color:#C9A84C;text-decoration:none;">{sig_email}</a>
             </p>
-            <p class="st" style="margin:6px 0 0;font-family:Georgia,serif;font-size:11px;
-              color:#94A3B8 !important;">
+            <p style="margin:0 0 2px;font-family:Georgia,serif;font-size:11px;
+              color:#64748B;">
+              <a href="https://idrshield.com"
+                style="color:#C9A84C;text-decoration:none;">idrshield.com</a>
+            </p>
+            <p style="margin:8px 0 0;font-family:Georgia,serif;font-size:10px;
+              color:#94A3B8;letter-spacing:0.02em;">
               14 E Washington St, Orlando, FL 32801
             </p>
           </td>
-          <td align="right" valign="top">
+          <td align="right" valign="top" width="120">
             <table cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td class="ss" bgcolor="#F4F5F7"
-                  style="background-color:#F4F5F7 !important;border-radius:4px;
-                         padding:10px 14px;font-family:Georgia,serif;font-size:10px;
-                         color:#64748B !important;letter-spacing:0.08em;
-                         text-transform:uppercase;text-align:center;line-height:1.6;">
-                  Independent HHS<br>Audit Records
+                <td bgcolor="#F7F4EE"
+                  style="background-color:#F7F4EE;border-radius:3px;
+                         padding:10px 14px;font-family:Georgia,serif;font-size:9px;
+                         color:#94A3B8;letter-spacing:0.1em;text-transform:uppercase;
+                         text-align:center;line-height:1.7;border:1px solid #E8DCC8;">
+                  Independent<br>HHS Audit<br>Records
                 </td>
               </tr>
             </table>
@@ -167,20 +150,26 @@ table{{border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt;}}
 
   <!-- FOOTER -->
   <tr>
-    <td class="ft" bgcolor="#0F1E2E"
-      style="background-color:#0F1E2E !important;padding:20px 40px;
-             border-radius:0 0 8px 8px;">
-      <p class="fa" style="margin:0;font-family:Georgia,serif;font-size:10px;
-        color:#94A3B8 !important;line-height:1.8;text-align:center;">
-        Institute of Digital Remediation &nbsp;|&nbsp;
-        <a href="https://idrshield.com"
-          style="color:#C9A84C !important;text-decoration:none;">idrshield.com</a><br>
-        14 E Washington St, Orlando, FL 32801<br>
-        Sent from
+    <td bgcolor="#2A2A2A"
+      style="background-color:#2A2A2A;padding:18px 40px;
+             border-radius:0 0 4px 4px;">
+      <p style="margin:0;font-family:Georgia,serif;font-size:10px;
+        color:#888888;line-height:1.8;text-align:center;">
+        Institute of Digital Remediation &nbsp;|&nbsp; Orlando, FL 32801<br>
         <a href="mailto:{sig_email}"
-          style="color:#C9A84C !important;text-decoration:none;">{sig_email}</a>
+          style="color:#C9A84C;text-decoration:none;">{sig_email}</a>
+        &nbsp;|&nbsp;
+        <a href="https://idrshield.com"
+          style="color:#C9A84C;text-decoration:none;">idrshield.com</a>
       </p>
     </td>
+  </tr>
+
+  <!-- BOTTOM GOLD RULE -->
+  <tr>
+    <td bgcolor="#C9A84C" height="3"
+      style="background-color:#C9A84C;height:3px;font-size:0;line-height:0;
+             border-radius:0 0 3px 3px;">&nbsp;</td>
   </tr>
 
 </table>
