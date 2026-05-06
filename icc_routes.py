@@ -482,3 +482,12 @@ def icc_reset_associations():
     from icc_email_queue import reset_and_reseed_associations
     added = reset_and_reseed_associations()
     return jsonify({'success': True, 'reseeded': added})
+
+
+@icc_bp.route('/api/queue/send-test', methods=['POST'])
+@cross_origin()
+def icc_send_test():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import send_test_email
+    result = send_test_email('idrshieldhq@gmail.com')
+    return jsonify(result)
