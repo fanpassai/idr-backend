@@ -420,7 +420,8 @@ Activate your audit at idrshield.com/healthcare"""
             to_email,
             subject,
             body,
-            salutation='Hans-Peter'
+            salutation='Hans-Peter',
+            institutional=True
         )
         return {'success': True, 'to': to_email}
     except Exception as e:
@@ -549,7 +550,7 @@ def approve_and_send_association(queue_id: int, edited_body: str = None) -> dict
         name, email, subject, body, salutation = row
         body = edited_body or body
 
-        _send_via_sendgrid(email, subject, body, salutation=salutation)
+        _send_via_sendgrid(email, subject, body, salutation=salutation, institutional=True)
 
         with conn.cursor() as cur:
             cur.execute("""
@@ -566,48 +567,198 @@ def approve_and_send_association(queue_id: int, edited_body: str = None) -> dict
 
 
 HTML_EMAIL_TEMPLATE = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>{subject}</title></head>
-<body style="margin:0;padding:0;background:#F4F5F7;font-family:Georgia,serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F5F7;padding:32px 0;">
-<tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
-<tr><td style="background:#0F1E2E;padding:32px 40px 28px;border-radius:8px 8px 0 0;">
-<table width="100%" cellpadding="0" cellspacing="0"><tr>
-<td><div style="font-family:Georgia,serif;font-size:11px;letter-spacing:0.18em;color:#C9A84C;text-transform:uppercase;margin-bottom:6px;">Institute of Digital Remediation</div>
-<div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#FFFFFF;letter-spacing:0.02em;">IDR Shield</div></td>
-<td align="right" valign="middle"><div style="background:#C9A84C;color:#0F1E2E;font-family:Georgia,serif;font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;padding:6px 14px;border-radius:3px;">HHS COMPLIANCE</div></td>
-</tr></table></td></tr>
-<tr><td style="background:#C9A84C;height:3px;line-height:3px;font-size:3px;">&nbsp;</td></tr>
-<tr><td style="background:#1a2e42;padding:12px 40px;">
-<table width="100%" cellpadding="0" cellspacing="0"><tr>
-<td style="font-family:Georgia,serif;font-size:11px;color:#94A3B8;letter-spacing:0.1em;text-transform:uppercase;">Federal Deadline</td>
-<td align="right" style="font-family:Georgia,serif;font-size:12px;color:#C9A84C;font-weight:700;">May 11, 2026 &mdash; {days_left} days remaining</td>
-</tr></table></td></tr>
-<tr><td style="background:#FFFFFF;padding:40px 40px 32px;border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
-<p style="margin:0 0 24px;font-family:Georgia,serif;font-size:15px;color:#1a2e42;line-height:1.7;">Dear {salutation},</p>
-{body_html}
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>{subject}</title>
+<style>
+:root {{ color-scheme: light only; }}
+* {{ -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; box-sizing: border-box; }}
+body {{ margin: 0; padding: 0; background-color: #F4F5F7 !important; font-family: Georgia, serif; }}
+table {{ border-collapse: collapse; mso-table-lspace: 0; mso-table-rspace: 0; }}
+img {{ border: 0; display: block; }}
+/* Force light mode on iOS dark mode */
+@media (prefers-color-scheme: dark) {{
+  body, .email-wrapper {{ background-color: #F4F5F7 !important; }}
+  .email-body {{ background-color: #FFFFFF !important; color: #374151 !important; }}
+  .email-header {{ background-color: #0F1E2E !important; }}
+  .email-subheader {{ background-color: #1a2e42 !important; }}
+  .email-footer {{ background-color: #0F1E2E !important; }}
+  p {{ color: #374151 !important; }}
+  .header-eyebrow {{ color: #C9A84C !important; }}
+  .header-title {{ color: #FFFFFF !important; }}
+  .gold-badge {{ background-color: #C9A84C !important; color: #0F1E2E !important; }}
+  .deadline-label {{ color: #94A3B8 !important; }}
+  .deadline-value {{ color: #C9A84C !important; }}
+  .salutation {{ color: #1a2e42 !important; }}
+  .sig-name {{ color: #0F1E2E !important; }}
+  .sig-title {{ color: #64748B !important; }}
+  .sig-link {{ color: #C9A84C !important; }}
+  .sig-stamp {{ background-color: #F4F5F7 !important; color: #64748B !important; }}
+  .footer-text {{ color: #94A3B8 !important; }}
+}}
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#F4F5F7;">
+<!--[if mso]><table width="100%" cellpadding="0" cellspacing="0"><tr><td><![endif]-->
+<table class="email-wrapper" width="100%" cellpadding="0" cellspacing="0"
+  style="background-color:#F4F5F7;padding:32px 0;width:100%;">
+<tr><td align="center" style="padding:0 16px;">
+<table width="600" cellpadding="0" cellspacing="0"
+  style="max-width:600px;width:100%;border-radius:8px;overflow:hidden;
+         box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+  <!-- HEADER -->
+  <tr>
+    <td class="email-header"
+      style="background-color:#0F1E2E;padding:32px 40px 28px;border-radius:8px 8px 0 0;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding-right:16px;">
+            <div class="header-eyebrow"
+              style="font-family:Georgia,serif;font-size:11px;letter-spacing:0.18em;
+                     color:#C9A84C;text-transform:uppercase;margin-bottom:6px;
+                     mso-line-height-rule:exactly;">
+              Institute of Digital Remediation
+            </div>
+            <div class="header-title"
+              style="font-family:Georgia,serif;font-size:24px;font-weight:700;
+                     color:#FFFFFF;letter-spacing:0.02em;line-height:1.2;">
+              IDR Shield
+            </div>
+          </td>
+          <td align="right" valign="middle" style="white-space:nowrap;">
+            <div class="gold-badge"
+              style="background-color:#C9A84C;color:#0F1E2E;font-family:Georgia,serif;
+                     font-size:10px;font-weight:700;letter-spacing:0.12em;
+                     text-transform:uppercase;padding:7px 14px;border-radius:3px;
+                     display:inline-block;">
+              HHS COMPLIANCE
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- GOLD RULE -->
+  <tr>
+    <td style="background-color:#C9A84C;height:3px;font-size:3px;line-height:3px;">&nbsp;</td>
+  </tr>
+
+  <!-- DEADLINE BAR -->
+  <tr>
+    <td class="email-subheader" style="background-color:#1a2e42;padding:13px 40px;">
+      <table width="100%" cellpadding="0" cellspacing="0">
+        <tr>
+          <td>
+            <span class="deadline-label"
+              style="font-family:Georgia,serif;font-size:11px;color:#94A3B8;
+                     letter-spacing:0.1em;text-transform:uppercase;">
+              Federal Deadline
+            </span>
+          </td>
+          <td align="right">
+            <span class="deadline-value"
+              style="font-family:Georgia,serif;font-size:12px;color:#C9A84C;
+                     font-weight:700;letter-spacing:0.04em;">
+              May 11, 2026 &nbsp;|&nbsp; {days_left} days remaining
+            </span>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- BODY -->
+  <tr>
+    <td class="email-body"
+      style="background-color:#FFFFFF;padding:40px 40px 8px;
+             border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
+      <p class="salutation"
+        style="margin:0 0 28px;font-family:Georgia,serif;font-size:16px;
+               color:#1a2e42;line-height:1.7;font-weight:600;">
+        Dear {salutation},
+      </p>
+      {body_html}
+    </td>
+  </tr>
+
+  <!-- SIGNATURE -->
+  <tr>
+    <td class="email-body"
+      style="background-color:#FFFFFF;padding:8px 40px 40px;
+             border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
+      <table cellpadding="0" cellspacing="0" width="100%"
+        style="border-top:2px solid #C9A84C;padding-top:24px;margin-top:16px;">
+        <tr>
+          <td valign="top" style="padding-right:16px;">
+            <div class="sig-name"
+              style="font-family:Georgia,serif;font-size:16px;font-weight:700;
+                     color:#0F1E2E;margin-bottom:3px;">
+              Hans-Peter Nkansah
+            </div>
+            <div class="sig-title"
+              style="font-family:Georgia,serif;font-size:12px;color:#64748B;
+                     letter-spacing:0.03em;margin-bottom:4px;">
+              Founder &amp; Director, Institute of Digital Remediation
+            </div>
+            <div style="font-family:Georgia,serif;font-size:11px;color:#64748B;
+                        margin-bottom:2px;">
+              <a class="sig-link" href="mailto:{sig_email}"
+                style="color:#C9A84C;text-decoration:none;">
+                {sig_email}
+              </a>
+              &nbsp;&nbsp;
+              <a class="sig-link" href="https://idrshield.com/healthcare"
+                style="color:#C9A84C;text-decoration:none;">
+                idrshield.com
+              </a>
+            </div>
+            <div style="font-family:Georgia,serif;font-size:11px;color:#94A3B8;
+                        margin-top:6px;">
+              14 E Washington St, Orlando, FL 32801
+            </div>
+          </td>
+          <td align="right" valign="top" style="white-space:nowrap;">
+            <div class="sig-stamp"
+              style="background-color:#F4F5F7;border-radius:4px;padding:10px 14px;
+                     font-family:Georgia,serif;font-size:10px;color:#64748B;
+                     letter-spacing:0.08em;text-transform:uppercase;text-align:center;
+                     line-height:1.6;">
+              Independent HHS<br>Audit Records
+            </div>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td class="email-footer"
+      style="background-color:#0F1E2E;padding:20px 40px;border-radius:0 0 8px 8px;">
+      <p class="footer-text"
+        style="margin:0;font-family:Georgia,serif;font-size:10px;color:#94A3B8;
+               line-height:1.7;text-align:center;">
+        Institute of Digital Remediation &nbsp;|&nbsp; idrshield.com<br>
+        14 E Washington St, Orlando, FL 32801<br>
+        Sent from
+        <a href="mailto:hello@idrshield.com"
+          style="color:#C9A84C;text-decoration:none;">
+          hello@idrshield.com
+        </a>
+      </p>
+    </td>
+  </tr>
+
+</table>
 </td></tr>
-<tr><td style="background:#FFFFFF;padding:0 40px 40px;border-left:1px solid #E8ECF0;border-right:1px solid #E8ECF0;">
-<table cellpadding="0" cellspacing="0" style="border-top:2px solid #C9A84C;padding-top:24px;width:100%;">
-<tr><td>
-<div style="font-family:Georgia,serif;font-size:15px;font-weight:700;color:#0F1E2E;margin-bottom:2px;">Hans-Peter Nkansah</div>
-<div style="font-family:Georgia,serif;font-size:12px;color:#64748B;letter-spacing:0.04em;margin-bottom:12px;">Founder &amp; Director &mdash; Institute of Digital Remediation</div>
-<div style="font-family:Georgia,serif;font-size:11px;color:#64748B;">
-&#9993; <a href="mailto:hello@idrshield.com" style="color:#C9A84C;text-decoration:none;">hello@idrshield.com</a>
-&nbsp;&nbsp;&#127760; <a href="https://idrshield.com/healthcare" style="color:#C9A84C;text-decoration:none;">idrshield.com</a>
-</div>
-</td>
-<td align="right" valign="bottom">
-<div style="background:#F4F5F7;border-radius:4px;padding:10px 16px;font-family:Georgia,serif;font-size:10px;color:#64748B;letter-spacing:0.08em;text-transform:uppercase;text-align:center;">Independent HHS<br>Audit Records</div>
-</td></tr></table></td></tr>
-<tr><td style="background:#0F1E2E;padding:20px 40px;border-radius:0 0 8px 8px;">
-<p style="margin:0;font-family:Georgia,serif;font-size:10px;color:#475569;line-height:1.6;text-align:center;">
-Institute of Digital Remediation &mdash; idrshield.com<br>
-This communication was sent from hello@idrshield.com
-</p></td></tr>
-</table></td></tr></table>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
 </body></html>"""
 
 
@@ -636,28 +787,33 @@ def _body_to_html(text: str) -> str:
     return html
 
 
-def _build_html_email(salutation: str, body_text: str, subject: str) -> str:
+def _build_html_email(salutation: str, body_text: str, subject: str,
+                       institutional: bool = False) -> str:
     """Wrap plain text body in the elite HTML template."""
     days = _days_left()
     body_html = _body_to_html(body_text)
+    sig_email = FROM_EMAIL_INST if institutional else FROM_EMAIL
     return HTML_EMAIL_TEMPLATE.format(
         subject=subject,
         days_left=days,
         salutation=salutation,
         body_html=body_html,
+        sig_email=sig_email,
     )
 
 
 def _send_via_sendgrid(to_email: str, subject: str, body_text: str,
-                        salutation: str = 'Team'):
+                        salutation: str = 'Team', institutional: bool = False):
     """Send branded HTML email via SendGrid from hello@idrshield.com."""
     if not SENDGRID_KEY:
         raise Exception('SendGrid key not configured')
     import sendgrid as sg_module
     from sendgrid.helpers.mail import Mail, Email, To, Content
-    html_body = _build_html_email(salutation, body_text, subject)
+    html_body = _build_html_email(salutation, body_text, subject, institutional=institutional)
+    sender_email = FROM_EMAIL_INST if institutional else FROM_EMAIL
+    sender_name  = FROM_NAME_INST  if institutional else FROM_NAME
     message = Mail(
-        from_email=Email(FROM_EMAIL, FROM_NAME),
+        from_email=Email(sender_email, sender_name),
         to_emails=To(to_email),
         subject=subject,
     )
