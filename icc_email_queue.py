@@ -708,6 +708,7 @@ def approve_and_send(queue_id: int, to_email: str, edited_body: str = None) -> d
                 SET status='sent', approved_at=NOW(), sent_at=NOW()
                 WHERE id=%s
             """, (queue_id,))
+        _send_confirmation_notification(name, recipient, 'Prospect Outreach')
         return {'success': True, 'sent': True, 'to': recipient}
 
     except Exception as e:
@@ -743,6 +744,7 @@ def approve_and_send_association(queue_id: int, edited_body: str = None) -> dict
                 SET status='sent', approved_at=NOW(), sent_at=NOW()
                 WHERE id=%s
             """, (queue_id,))
+        _send_confirmation_notification(name, email, 'Association Pitch')
         return {'success': True, 'sent': True, 'to': email, 'name': name}
 
     except Exception as e:
@@ -818,6 +820,36 @@ def _send_via_sendgrid(to_email: str, subject: str, body_text: str,
     response = client.client.mail.send.post(request_body=message.get())
     if response.status_code not in (200, 202):
         raise Exception(f'SendGrid error: {response.status_code}')
+
+
+def _send_confirmation_notification(recipient_name: str, recipient_email: str,
+                                     email_type: str = 'association') -> None:
+    """Fire a quick confirmation to idrshieldhq@gmail.com when an email is sent."""
+    try:
+        from datetime import datetime
+        now = datetime.now().strftime('%b %d, %I:%M %p')
+        subject = f"✓ Sent: {recipient_name}"
+        body = f"""Email delivered successfully.
+
+To: {recipient_name}
+Address: {recipient_email}
+Type: {email_type}
+Time: {now}
+
+Check hans-peter@instituteofdigitalremediation.org for replies.
+"""
+        import sendgrid as sg_module
+        from sendgrid.helpers.mail import Mail, Email, To, Content
+        msg = Mail(
+            from_email=Email(FROM_EMAIL_INST, 'ICC Notifications'),
+            to_emails=To('idrshieldhq@gmail.com'),
+            subject=subject,
+        )
+        msg.content = [Content('text/plain', body)]
+        client = sg_module.SendGridAPIClient(api_key=SENDGRID_KEY)
+        client.client.mail.send.post(request_body=msg.get())
+    except Exception as e:
+        print(f'[ICC_NOTIFY] Notification failed (non-critical): {e}')
 
 
 def get_queue_stats() -> dict:
