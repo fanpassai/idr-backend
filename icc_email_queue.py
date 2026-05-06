@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 SENDGRID_KEY  = os.environ.get('SENDGRID_API_KEY', '')
 FROM_EMAIL    = 'hello@idrshield.com'
-FROM_NAME     = 'Hans-Peter Nkansah — Institute of Digital Remediation'
+FROM_NAME     = 'Hans-Peter Nkansah, Institute of Digital Remediation'
 DEADLINE      = datetime(2026, 5, 11, tzinfo=timezone.utc)
 
 
@@ -83,7 +83,7 @@ def generate_prospect_email(prospect: dict) -> dict:
 
     type_map = {
         'fqhc': ('health center', 'FQHCs are explicitly named in HHS 89 FR 40066 as covered entities. Your federal funding relationship means HHS OCR has direct jurisdiction over your digital presence.'),
-        'nh':   ('nursing facility', 'The Section 504 digital requirement covers your website, online admissions forms, and family portal. Enforcement is complaint-driven — identical in mechanism to CMS/QAPI.'),
+        'nh':   ('nursing facility', 'The Section 504 digital requirement covers your website, online admissions forms, and family portal. Enforcement is complaint-driven, identical in mechanism to CMS/QAPI.'),
         'hha':  ('home health agency', 'Home health agencies receiving Medicare or Medicaid funding are covered entities under the May 11 WCAG 2.1 AA digital accessibility requirement.'),
     }
     org_label, type_context = type_map.get(otype, ('healthcare organization', 'Your organization receives federal health funding and is a covered entity under HHS 89 FR 40066.'))
@@ -91,7 +91,7 @@ def generate_prospect_email(prospect: dict) -> dict:
     location = f"{city}, {state}" if city and state else (state or 'Florida')
 
     if score is not None and score < 60:
-        subject = f"HHS Accessibility Scan — {name} — {crits} Critical Violations Found"
+        subject = f"HHS Accessibility Scan, {name}, {crits} Critical Violations Found"
         body = f"""Hi,
 
 I wanted to make sure your compliance team was aware of something time-sensitive before May 11.
@@ -101,17 +101,17 @@ I ran an external HHS accessibility scan of {name}'s website ahead of the Sectio
 Score: {score}/100
 Critical violations: {crits}
 Status: FAIL
-Deadline: May 11, 2026 — {days} days away
+Deadline: May 11, 2026, {days} days away
 
 {type_context}
 
 The {crits} critical violation{"s" if crits != 1 else ""} found would be cited in an OCR investigation as direct barriers to patient access. Organizations without a documented audit record have nothing on file when a complaint is filed.
 
-We publish independent third-party HHS accessibility audit records — a timestamped, cryptographically sealed document that goes on a public compliance registry. Initial audit is $497, delivered within 48 hours.
+We publish independent third-party HHS accessibility audit records, a timestamped, cryptographically sealed document that goes on a public compliance registry. Initial audit is $497, delivered within 48 hours.
 
 You can see the full scan results and activate at: idrshield.com/healthcare
 
-Free to review — no obligation.
+Free to review, no obligation.
 
 Hans-Peter Nkansah
 Institute of Digital Remediation
@@ -119,20 +119,20 @@ hello@idrshield.com
 idrshield.com"""
 
     else:
-        subject = f"May 11 HHS Deadline — {name} — 48-Hour Audit Available"
+        subject = f"May 11 HHS Deadline, {name}, 48-Hour Audit Available"
         body = f"""Hi,
 
 I work in HHS healthcare accessibility compliance and wanted to make sure {name} had a documented WCAG 2.1 AA audit record before the May 11 deadline.
 
 {type_context}
 
-HHS 89 FR 40066 — published July 8, 2024 — requires documented WCAG 2.1 AA conformance for your website, patient portal, and any digital intake tools by May 11, 2026. That is {days} days from today.
+HHS 89 FR 40066, published July 8, 2024, requires documented WCAG 2.1 AA conformance for your website, patient portal, and any digital intake tools by May 11, 2026. That is {days} days from today.
 
-The risk isn't just having violations. It's having no documentation when a patient complaint triggers an OCR investigation. Organizations with a dated, independently verified audit record — even one showing violations and a remediation plan — are in a fundamentally stronger position than those with nothing on file.
+The risk isn't just having violations. It's having no documentation when a patient complaint triggers an OCR investigation. Organizations with a dated, independently verified audit record, even one showing violations and a remediation plan, are in a fundamentally stronger position than those with nothing on file.
 
 We publish third-party HHS audit records for {org_label}s across {location} and nationally. Initial audit is $497, delivered within 48 hours. Free readiness scan at idrshield.com/healthcare.
 
-Happy to answer any questions about the rule — no obligation.
+Happy to answer any questions about the rule, no obligation.
 
 Hans-Peter Nkansah
 Institute of Digital Remediation
@@ -153,79 +153,79 @@ idrshield.com"""
 
 
 def generate_association_emails() -> list:
-    """Generate pitch emails for all 10 associations — named contacts, HTML-ready."""
+    """Generate pitch emails for all 10 associations, named contacts, HTML-ready."""
     days = _days_left()
 
     def _body(org, serves, named_person, role, specific_angle):
         return f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days} days away. {specific_angle}
 
-HHS 89 FR 40066 — published July 8, 2024 — requires WCAG 2.1 AA compliance for every covered entity's website, patient portal, and digital intake tools. For {org} members, this is not a future obligation. It is an active enforcement window opening in {days} days.
+HHS 89 FR 40066, published July 8, 2024, requires WCAG 2.1 AA compliance for every covered entity website, patient portal, and digital intake tool. For {org} members, this is not a future obligation. It is an active enforcement window opening in {days} days.
 
-The exposure most organizations don't anticipate: it is not the violations that trigger the deepest risk. It is the absence of documentation. An organization with a dated, independently verified audit record — even one showing violations alongside a remediation plan — is in a fundamentally different position than one with nothing on file when OCR begins an investigation.
+The risk most organizations do not anticipate is not the violations themselves. It is the absence of documentation. An organization that has a dated, independently verified audit record on file is in a fundamentally stronger position when OCR opens an investigation than one with nothing documented at all.
 
-I would like to offer {org} a member compliance alert, written and delivered within 24 hours at no cost. The piece would explain precisely what the rule requires technically, which member categories are covered, and what documentation should exist before May 11.
+I would like to offer {org} a member compliance alert, written and delivered within 24 hours at no cost. The piece would explain what the rule requires, which member categories are covered, and what documentation should exist before May 11.
 
-I run the Institute of Digital Remediation. We publish independent third-party HHS accessibility audit records for healthcare organizations nationally. I am not asking for a promotional placement. I am offering factual compliance content your members need this week.
+I run the Institute of Digital Remediation. We publish independent third-party HHS accessibility audit records for healthcare organizations nationally. I am not asking for a promotional placement. I am offering factual compliance content that your members need this week.
 
 Would a member alert be useful for your next communication?"""
 
     return [
         {
             'id': 'nachc',
-            'name': 'NACHC — National Association of Community Health Centers',
+            'name': 'NACHC, National Association of Community Health Centers',
             'email': 'advocacy@nachc.org',
             'named_email': 'krhee@nachc.org',
             'named_contact': 'Dr. Kyu Rhee',
             'named_title': 'President & CEO, NACHC',
-            'subject': 'May 11 HHS Section 504 Deadline — Member Alert Opportunity for Health Centers',
+            'subject': 'May 11 HHS Section 504 Deadline, Member Alert Opportunity for Health Centers',
             'salutation': 'NACHC Policy & Advocacy Team',
             'body': _body('NACHC', 'FQHCs', 'Amanda Pears Kelly', 'CEO',
-                'FQHCs are explicitly named in HHS 89 FR 40066 as covered entities. Every health center website, patient portal, and digital intake tool is subject to this requirement. Your members are among the most directly exposed organizations in the country — and among those with the most to lose if a complaint triggers OCR with nothing documented.')
+                'FQHCs are explicitly named in HHS 89 FR 40066 as covered entities. Every health center website, patient portal, and digital intake tool is subject to this requirement. Your members are among the most directly exposed organizations in the country, and among those with the most to lose if a complaint triggers OCR with nothing documented.')
         },
         {
             'id': 'nhsa',
-            'name': 'NHSA — National Head Start Association',
+            'name': 'NHSA, National Head Start Association',
             'email': 'info@nhsa.org',
             'named_email': 'yvinci@nhsa.org',
             'named_contact': 'Yasmina Vinci',
             'named_title': 'CEO, NHSA',
-            'subject': 'May 11 HHS Digital Deadline — Head Start Programs Are Covered',
+            'subject': 'May 11 HHS Digital Deadline, Head Start Programs Are Covered',
             'salutation': 'NHSA Communications Team',
             'body': _body('NHSA', 'Head Start programs', 'Yasmina Vinci', 'CEO',
                 'Head Start programs receive direct HHS funding and are explicitly covered by the May 11 Section 504 digital accessibility deadline. Most program directors assume this rule applies to hospitals and clinics. It applies equally to every program website, enrollment portal, and digital family resource.')
         },
         {
             'id': 'ahca',
-            'name': 'AHCA — American Health Care Association',
+            'name': 'AHCA, American Health Care Association',
             'email': 'info@ahca.org',
             'named_email': 'cporter@ahcancal.org',
             'named_contact': 'Clifton J. Porter II',
             'named_title': 'President & CEO, AHCA/NCAL',
-            'subject': 'May 11 HHS Website Accessibility Deadline — Long-Term Care Members',
+            'subject': 'May 11 HHS Website Accessibility Deadline, Long-Term Care Members',
             'salutation': 'AHCA/NCAL Leadership Team',
             'body': _body('AHCA', 'nursing homes and post-acute facilities', 'Mark Parkinson', 'President & CEO',
-                'Nursing homes and post-acute care facilities are covered entities under HHS 89 FR 40066. The enforcement mechanism is complaint-driven — structurally identical to what your members know from CMS oversight. Every member website, online admissions form, and family portal is subject to WCAG 2.1 AA by May 11.')
+                'Nursing homes and post-acute care facilities are covered entities under HHS 89 FR 40066. The enforcement mechanism is complaint-driven, structurally identical to what your members know from CMS oversight. Every member website, online admissions form, and family portal is subject to WCAG 2.1 AA by May 11.')
         },
         {
             'id': 'mgma',
-            'name': 'MGMA — Medical Group Management Association',
+            'name': 'MGMA, Medical Group Management Association',
             'email': 'government.affairs@mgma.com',
             'named_email': 'agilberg@mgma.com',
             'named_contact': 'Anders Gilberg',
             'named_title': 'Senior VP, Government Affairs, MGMA',
-            'subject': 'May 11 HHS Deadline — Physician Practice Websites Are Covered',
+            'subject': 'May 11 HHS Deadline, Physician Practice Websites Are Covered',
             'salutation': 'MGMA Government Affairs Team',
             'body': _body('MGMA', 'physician practice administrators', 'Anders Gilberg', 'SVP Government Affairs',
-                'Physician practices that accept Medicaid or participate in any HHS-funded program are covered entities under the May 11 HHS Section 504 deadline. This covers their websites, patient portals, and online scheduling systems. MGMA members are the administrators who handle this — and most have not yet been informed their digital presence falls under this requirement.')
+                'Physician practices that accept Medicaid or participate in any HHS-funded program are covered entities under the May 11 HHS Section 504 deadline. This covers their websites, patient portals, and online scheduling systems. MGMA members are the administrators who handle this, and most have not yet been informed their digital presence falls under this requirement.')
         },
         {
             'id': 'nahc',
-            'name': 'NAHC — National Association for Home Care & Hospice',
+            'name': 'NAHC, National Association for Home Care & Hospice',
             'email': 'info@nahc.org',
             'named_email': 'wdombi@nahc.org',
             'named_contact': 'William Dombi',
             'named_title': 'President, NAHC',
-            'subject': 'May 11 HHS Digital Deadline — Home Health Agencies Are Covered',
+            'subject': 'May 11 HHS Digital Deadline, Home Health Agencies Are Covered',
             'salutation': 'NAHC Communications Team',
             'body': _body('NAHC', 'home health agencies and hospices', 'William Dombi', 'President',
                 'Home health agencies and hospices receiving Medicare or Medicaid funding are covered entities under the May 11 HHS Section 504 deadline. Every agency website, online intake form, and patient-facing digital tool must meet WCAG 2.1 AA. The agencies most at risk are those with no documented audit record when a patient complaint triggers OCR.')
@@ -237,25 +237,25 @@ Would a member alert be useful for your next communication?"""
             'named_email': 'ksloan@leadingage.org',
             'named_contact': 'Katie Smith Sloan',
             'named_title': 'President & CEO, LeadingAge',
-            'subject': 'May 11 HHS Section 504 Deadline — Non-Profit Aging Services Members',
+            'subject': 'May 11 HHS Section 504 Deadline, Non-Profit Aging Services Members',
             'salutation': 'LeadingAge Policy Team',
             'body': _body('LeadingAge', 'non-profit aging services providers', 'Katie Smith Sloan', 'President & CEO',
-                'LeadingAge members — nursing homes, assisted living, hospice, and home health — are covered entities under the May 11 HHS Section 504 digital accessibility deadline. Many non-profit aging services organizations have the mission commitment but lack the technical documentation OCR looks for when a complaint is filed.')
+                'LeadingAge members, nursing homes, assisted living, hospice, and home health, are covered entities under the May 11 HHS Section 504 digital accessibility deadline. Many non-profit aging services organizations have the mission commitment but lack the technical documentation OCR looks for when a complaint is filed.')
         },
         {
             'id': 'ahla',
-            'name': 'AHLA — American Health Law Association',
+            'name': 'AHLA, American Health Law Association',
             'email': 'publications@americanhealthlaw.org',
             'named_email': 'publications@americanhealthlaw.org',
             'named_contact': 'Publications Team',
             'named_title': 'American Health Law Association',
-            'subject': 'Guest Article: HHS Section 504 Digital Compliance — Healthcare Counsel Alert',
+            'subject': 'Guest Article: HHS Section 504 Digital Compliance, Healthcare Counsel Alert',
             'salutation': 'AHLA Publications Team',
-            'body': f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days} days away. I would like to submit a guest article for Health Law Daily or The Health Lawyer framed specifically for healthcare counsel.
+            'body': f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days} days away. I would like to submit a guest article for Health Law Daily or The Health Lawyer, framed specifically for healthcare counsel.
 
-The piece: "The May 11 HHS Digital Accessibility Deadline: What Covered Entities Need Documented Before Enforcement Opens" — 700 words covering the regulatory basis in HHS 89 FR 40066, covered entity categories, what constitutes a defensible compliance record in an OCR investigation, and the distinction between having violations and having no documentation at all.
+The piece is titled "The May 11 HHS Digital Accessibility Deadline: What Covered Entities Need Documented Before Enforcement Opens." It runs approximately 700 words and covers the regulatory basis in HHS 89 FR 40066, the covered entity categories, what constitutes a defensible compliance record in an OCR investigation, and why absence of documentation is more damaging than imperfect compliance.
 
-AHLA members are advising covered organizations right now. The attorneys who read Health Law Daily this week are the same attorneys whose clients will be filing corrective action plans after May 11 without this information.
+AHLA members are advising covered organizations right now. The attorneys reading Health Law Daily this week are the same attorneys whose clients will face corrective action plans after May 11 without this guidance.
 
 I run the Institute of Digital Remediation. I can have the full article submitted within 24 hours.
 
@@ -263,42 +263,42 @@ Would this be appropriate for an upcoming issue?"""
         },
         {
             'id': 'ada_dental',
-            'name': 'ADA — American Dental Association',
+            'name': 'ADA, American Dental Association',
             'email': 'memberservice@ada.org',
             'named_email': 'jada@ada.org',
             'named_contact': 'JADA Editorial Office',
             'named_title': 'Journal of the American Dental Association',
-            'subject': 'May 11 HHS Deadline — Dental Practices Accepting Medicaid Are Covered',
+            'subject': 'May 11 HHS Deadline, Dental Practices Accepting Medicaid Are Covered',
             'salutation': 'ADA Practice Resources Team',
             'body': _body('ADA', 'dental practices', 'ADA Practice Resources', 'Team',
                 'Dental practices that accept Medicaid are covered entities under the May 11, 2026 HHS Section 504 digital accessibility deadline. This is one of the most consistently overlooked applications of the rule. Every practice website, online scheduling tool, and patient intake form must meet WCAG 2.1 AA. ADA members include hundreds of thousands of practices that have not been informed their digital presence falls under this requirement.')
         },
         {
             'id': 'ahip',
-            'name': "AHIP — America's Health Insurance Plans",
+            'name': "AHIP, America's Health Insurance Plans",
             'email': 'media@ahip.org',
             'named_email': 'media@ahip.org',
             'named_contact': 'Communications Team',
             'named_title': "America's Health Insurance Plans",
-            'subject': 'May 11 HHS Section 504 Digital Deadline — Health Plan Members',
+            'subject': 'May 11 HHS Section 504 Digital Deadline, Health Plan Members',
             'salutation': 'AHIP Communications Team',
             'body': _body('AHIP', 'health insurers and managed care organizations', 'AHIP Team', 'Communications',
                 'Health insurers and managed care organizations are covered entities under the May 11 HHS Section 504 digital accessibility deadline. Member portals, plan comparison tools, provider directories, and digital enrollment systems all fall under WCAG 2.1 AA requirements. For health plans, the digital surface area is large and the patient population includes the very individuals the rule was designed to protect.')
         },
         {
             'id': 'jdsupra',
-            'name': 'JD Supra — Healthcare Legal Publications',
+            'name': 'JD Supra, Healthcare Legal Publications',
             'email': 'editorial@jdsupra.com',
             'named_email': 'editorial@jdsupra.com',
             'named_contact': 'Editorial Team',
             'named_title': 'JD Supra',
-            'subject': 'Guest Submission: HHS Section 504 Digital Deadline — Healthcare Compliance Alert',
+            'subject': 'Guest Submission: HHS Section 504 Digital Deadline, Healthcare Compliance Alert',
             'salutation': 'JD Supra Editorial Team',
             'body': f"""I would like to submit a guest article for JD Supra's healthcare practice area on the May 11, 2026 HHS Section 504 digital accessibility deadline.
 
-The piece: "The May 11 HHS Digital Accessibility Deadline: What Healthcare Organizations Need Documented Before Enforcement Opens" — 700 words covering the regulatory basis, covered entity categories, what OCR looks for in investigations, and what constitutes a defensible compliance record.
+The article is titled "The May 11 HHS Digital Accessibility Deadline: What Healthcare Organizations Need Documented Before Enforcement Opens." It runs approximately 700 words and covers the regulatory basis, which entities are covered, what OCR looks for during an investigation, and what documentation puts an organization in a defensible position.
 
-JD Supra reaches 250,000 legal and compliance professionals. Given the {days}-day window before enforcement opens, the timing makes this directly actionable for your readers today.
+JD Supra reaches 250,000 legal and compliance professionals. With {days} days until enforcement opens, this is directly actionable for your readers today.
 
 I run the Institute of Digital Remediation. We publish independent third-party HHS accessibility audit records for healthcare organizations. I can submit the full article within 24 hours.
 
@@ -316,7 +316,7 @@ def queue_prospect_email(email_data: dict) -> bool:
     if not conn: return False
     try:
         with conn.cursor() as cur:
-            # Don't duplicate — check if prospect already queued today
+            # Don't duplicate, check if prospect already queued today
             cur.execute("""
                 SELECT id FROM icc_email_queue
                 WHERE prospect_id = %s AND status IN ('pending','approved')
@@ -351,7 +351,7 @@ def queue_prospect_email(email_data: dict) -> bool:
 
 
 def queue_association_emails():
-    """Pre-populate all 10 association emails — primary + named contact versions."""
+    """Pre-populate all 10 association emails, primary + named contact versions."""
     from database import get_conn
     conn = get_conn()
     if not conn: return 0
@@ -397,6 +397,34 @@ def queue_association_emails():
 
 
 
+
+
+
+def send_test_email(to_email: str = 'idrshieldhq@gmail.com') -> dict:
+    """Send a test HTML email so Hans-Peter can preview the design."""
+    subject = "IDR Shield — Email Design Preview"
+    body = """This is a preview of how your outreach emails will appear to association directors and healthcare compliance officers.
+
+The design you are seeing was built to communicate authority and professionalism. The dark navy header carries the IDR Shield brand. The gold accent line signals premium positioning. The Georgia serif typeface reads as institutional rather than promotional.
+
+Every association email you approve from the ICC Email Queue will be delivered in this format, sent from hello@idrshield.com via SendGrid.
+
+Here is what a typical paragraph of outreach copy looks like. The May 11, 2026 HHS Section 504 digital accessibility deadline requires WCAG 2.1 AA compliance for every covered entity website, patient portal, and digital intake tool. Organizations without a documented audit record have nothing on file when OCR opens an investigation.
+
+We publish independent third-party HHS accessibility audit records for healthcare organizations nationally.
+
+Activate your audit at idrshield.com/healthcare"""
+
+    try:
+        _send_via_sendgrid(
+            to_email,
+            subject,
+            body,
+            salutation='Hans-Peter'
+        )
+        return {'success': True, 'to': to_email}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 def reset_and_reseed_associations():
     """Clear all pending association emails and reseed with latest copy."""
@@ -481,10 +509,10 @@ def approve_and_send(queue_id: int, to_email: str, edited_body: str = None) -> d
         recipient = to_email or stored_email
 
         if not recipient:
-            # Mark as approved but no email address — needs manual send
+            # Mark as approved but no email address, needs manual send
             with conn.cursor() as cur:
                 cur.execute("UPDATE icc_email_queue SET status='approved', approved_at=NOW() WHERE id=%s", (queue_id,))
-            return {'success': True, 'sent': False, 'message': 'Approved — add recipient email to send'}
+            return {'success': True, 'sent': False, 'message': 'Approved, add recipient email to send'}
 
         _send_via_sendgrid(recipient, subject, body)
 
