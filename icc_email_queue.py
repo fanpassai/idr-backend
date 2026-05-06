@@ -9,8 +9,10 @@ import os, json
 from datetime import datetime, timezone
 
 SENDGRID_KEY  = os.environ.get('SENDGRID_API_KEY', '')
-FROM_EMAIL    = 'hello@idrshield.com'
-FROM_NAME     = 'Hans-Peter Nkansah, Institute of Digital Remediation'
+FROM_EMAIL      = 'hello@idrshield.com'
+FROM_NAME       = 'Hans-Peter Nkansah, IDR Shield'
+FROM_EMAIL_INST = 'hans-peter@instituteofdigitalremediation.org'
+FROM_NAME_INST  = 'Hans-Peter Nkansah, Institute of Digital Remediation'
 DEADLINE      = datetime(2026, 5, 11, tzinfo=timezone.utc)
 
 
