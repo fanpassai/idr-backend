@@ -1,3 +1,19 @@
+# ICC Email Queue System
+# Generates personalized outreach emails for every prospect,
+# stores them for review, sends approved ones via SendGrid.
+# Contact: hans-peter@instituteofdigitalremediation.org
+import os, json
+from datetime import datetime, timezone
+
+SENDGRID_KEY  = os.environ.get('SENDGRID_API_KEY', '')
+FROM_EMAIL      = 'hello@idrshield.com'
+FROM_NAME       = 'IDR Shield'
+FROM_EMAIL_INST = 'hans-peter@instituteofdigitalremediation.org'
+FROM_NAME_INST  = 'Institute of Digital Remediation'
+DEADLINE      = datetime(2026, 5, 11, tzinfo=timezone.utc)
+
+# ── HTML EMAIL TEMPLATE ───────────────────────────────────────────────────────
+_TEMPLATE_SENTINEL = True  # ensures no adjacent string concatenation
 HTML_EMAIL_TEMPLATE = """<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
@@ -176,22 +192,8 @@ p{{margin:0 0 20px;}}
 </td></tr>
 </table>
 </body>
-</html>""""""
-ICC Email Queue System
-Generates personalized outreach emails for every prospect,
-stores them for review, sends approved ones via SendGrid.
-Hans-Peter reviews in ICC → clicks Approve → email sends from hello@idrshield.com
-"""
+</html>"""
 
-import os, json
-from datetime import datetime, timezone
-
-SENDGRID_KEY  = os.environ.get('SENDGRID_API_KEY', '')
-FROM_EMAIL      = 'hello@idrshield.com'
-FROM_NAME       = 'Hans-Peter Nkansah, IDR Shield'
-FROM_EMAIL_INST = 'hans-peter@instituteofdigitalremediation.org'
-FROM_NAME_INST  = 'Institute of Digital Remediation'
-DEADLINE      = datetime(2026, 5, 11, tzinfo=timezone.utc)
 
 
 # ── DATABASE SETUP ────────────────────────────────────────────────────────────
