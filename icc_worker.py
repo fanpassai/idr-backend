@@ -468,8 +468,8 @@ def run_icc_cycle():
     if now.hour % 6 == 0:
         run_harvest_cycle(limit_per_state=50)
 
-    # Daily briefing at 7am UTC
-    if now.hour == 7 and now.minute < 60:
+    # Daily briefing at 11am UTC = 7am EDT (Orlando)
+    if now.hour == 11 and now.minute < 60:
         send_daily_briefing()
 
     print('[ICC_WORKER] Cycle complete')
