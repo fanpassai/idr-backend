@@ -473,3 +473,12 @@ def icc_generate_queue():
     from icc_email_queue import generate_and_queue_from_prospects
     added = generate_and_queue_from_prospects(limit=200)
     return jsonify({'success': True, 'queued': added})
+
+
+@icc_bp.route('/api/queue/reset-associations', methods=['POST'])
+@cross_origin()
+def icc_reset_associations():
+    if not _auth(request): return _unauth()
+    from icc_email_queue import reset_and_reseed_associations
+    added = reset_and_reseed_associations()
+    return jsonify({'success': True, 'reseeded': added})
