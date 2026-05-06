@@ -491,3 +491,15 @@ def icc_send_test():
     from icc_email_queue import send_test_email
     result = send_test_email('idrshieldhq@gmail.com')
     return jsonify(result)
+
+
+@icc_bp.route('/api/briefing/send-now', methods=['POST'])
+@cross_origin()
+def icc_send_briefing_now():
+    if not _auth(request): return _unauth()
+    try:
+        from icc_worker import send_daily_briefing
+        send_daily_briefing()
+        return jsonify({'success': True, 'message': 'Morning briefing sent to idrshieldhq@gmail.com'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
