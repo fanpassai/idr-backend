@@ -252,206 +252,212 @@ def run_scan_cycle(batch_size=8):
 # ── DAILY BRIEFING ────────────────────────────────────────────────────────────
 
 def send_daily_briefing():
-    """Sends a 7am email briefing to Hans-Peter."""
+    """Sends a real intelligence briefing — pulls from actual DB tables."""
     if not SENDGRID_KEY:
         print('[ICC_WORKER] No SendGrid key — skipping briefing')
         return
 
-    from icc_database import get_icc_stats, get_followups_due, get_associations
-
-    stats    = get_icc_stats()
-    followups= get_followups_due()
-    assocs   = get_associations()
-    not_contacted = [a for a in assocs if a['status'] == 'not_contacted'][:3]
-
+    from icc_database import (get_icc_stats, get_scanned_prospects,
+                               get_warm_leads, get_associations, log_activity)
     from datetime import date as _date
-    _today   = _date.today()
-    _dl_date = _date(2026, 5, 11)
-    days     = max(0, (_dl_date - _today).days)
-    date_str = datetime.now(timezone.utc).strftime('%A, %B %d')
+    _today = _date.today()
+    _dl    = _date(2026, 5, 11)
+    days   = max(0, (_dl - _today).days)
+    stats  = get_icc_stats()
+    if not stats:
+        print('[ICC_WORKER] No stats — skipping briefing')
+        return
 
-    # Build to-do list with AI
-    todos = _generate_daily_todos(stats, followups, not_contacted, days)
+    scanned    = get_scanned_prospects(limit=100)
+    warm_leads = get_warm_leads()
+    assocs     = get_associations()
+    associations_warm    = [a for a in assocs if a.get('status') in ('opened','replied','in_conversation')]
+    associations_not_yet = [a for a in assocs if a.get('status') == 'not_contacted']
+    fail_scores  = [p for p in scanned if (p.get('idr_score') or 101) < 60]
+    warn_scores  = [p for p in scanned if 60 <= (p.get('idr_score') or 101) < 80]
+    pass_scores  = [p for p in scanned if (p.get('idr_score') or 0) >= 80]
 
-    subject = f'ICC Morning Briefing — {date_str} — {days} days to May 11'
+    def sc(s):
+        if s is None: return '#64748B'
+        if s < 60: return '#DC2626'
+        if s < 80: return '#D97706'
+        return '#059669'
 
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"></head>
-<body style="font-family:Georgia,serif;background:#f8f6f2;margin:0;padding:24px 16px;">
-<div style="max-width:580px;margin:0 auto;background:#fff;border:1px solid #e8e4dc;">
+    # Build sections as strings
+    warm_section = ''
+    if warm_leads:
+        rows = ''
+        for lead in warm_leads[:5]:
+            s = lead.get('idr_score')
+            ph = ('<div style="font-size:11px;color:#374151;">&#128222; ' +
+                  lead.get('phone','') + '</div>') if lead.get('phone') else ''
+            rows += ('<div style="border-left:3px solid #C9A84C;padding:10px 14px;'
+                     'margin-bottom:8px;background:#FFFBEB;">'
+                     '<div style="font-size:14px;font-weight:700;color:#0F1E2E;">' +
+                     lead.get('name','') + '</div>'
+                     '<div style="font-size:11px;color:#64748B;">Score: <b style="color:' +
+                     sc(s) + '">' + str(s) + '/100</b> &nbsp;|&nbsp; ' +
+                     lead.get('status','').upper() + '</div>' + ph +
+                     '<div style="font-size:11px;color:#C9A84C;">&#8594; Follow up immediately</div>'
+                     '</div>')
+        warm_section = ('<p style="font-size:10px;letter-spacing:0.12em;color:#C9A84C;'
+                        'text-transform:uppercase;margin:20px 0 8px;">WARM LEADS — ACT TODAY</p>' + rows)
 
-  <!-- Header -->
-  <div style="background:#0A0E1A;padding:20px 28px;border-bottom:3px solid #C9A84C;">
-    <div style="font-family:Arial,sans-serif;font-size:8px;font-weight:700;
-         letter-spacing:.22em;text-transform:uppercase;color:rgba(201,168,76,.55);
-         margin-bottom:4px;">ICC · IDR Command Center</div>
-    <div style="font-family:Georgia,serif;font-size:18px;color:#FAF7F2;">
-      Morning Briefing · {date_str}
-    </div>
-  </div>
+    fail_section = ''
+    if fail_scores:
+        rows = ''
+        for p in fail_scores[:8]:
+            s = p.get('idr_score', 0)
+            ph = ('<div style="font-size:11px;color:#374151;">&#128222; ' +
+                  p.get('phone','') + '</div>') if p.get('phone') else ''
+            rows += ('<div style="border-left:3px solid #DC2626;padding:8px 14px;'
+                     'margin-bottom:6px;background:#FEF2F2;">'
+                     '<div style="font-size:13px;font-weight:700;color:#0F1E2E;">' +
+                     p.get('name','') + '</div>'
+                     '<div style="font-size:11px;color:#64748B;">' +
+                     p.get('city','') + ', ' + p.get('state','') +
+                     ' &nbsp;|&nbsp; Score: <b style="color:#DC2626">' +
+                     str(s) + '/100</b> &nbsp;|&nbsp; ' +
+                     str(p.get('critical_count',0)) + ' critical</div>' + ph + '</div>')
+        fail_section = ('<p style="font-size:10px;letter-spacing:0.12em;color:#DC2626;'
+                        'text-transform:uppercase;margin:20px 0 8px;">PRIORITY — SCORE BELOW 60</p>' + rows)
 
-  <!-- Days remaining banner -->
-  <div style="background:{'#B8280A' if days<=3 else '#C47F00' if days<=7 else '#1A7A3C'};
-       padding:12px 28px;text-align:center;">
-    <span style="font-family:Arial,sans-serif;font-size:11px;font-weight:700;
-         letter-spacing:.14em;text-transform:uppercase;color:#fff;">
-      {days} DAYS TO MAY 11 DEADLINE
-    </span>
-  </div>
+    scan_section = ''
+    if scanned:
+        scan_section = ('<p style="font-size:10px;letter-spacing:0.12em;color:#C9A84C;'
+                        'text-transform:uppercase;margin:20px 0 8px;">' +
+                        str(len(scanned)) + ' ORGANIZATIONS SCANNED</p>'
+                        '<table width="100%" cellpadding="0" cellspacing="8" style="margin-bottom:16px;"><tr>'
+                        '<td align="center" style="background:#FEF2F2;padding:10px;border-radius:4px;">'
+                        '<div style="font-size:28px;font-weight:700;color:#DC2626;">' + str(len(fail_scores)) + '</div>'
+                        '<div style="font-size:9px;color:#DC2626;text-transform:uppercase;">FAIL</div></td>'
+                        '<td align="center" style="background:#FFFBEB;padding:10px;border-radius:4px;">'
+                        '<div style="font-size:28px;font-weight:700;color:#D97706;">' + str(len(warn_scores)) + '</div>'
+                        '<div style="font-size:9px;color:#D97706;text-transform:uppercase;">WARNING</div></td>'
+                        '<td align="center" style="background:#F0FDF4;padding:10px;border-radius:4px;">'
+                        '<div style="font-size:28px;font-weight:700;color:#059669;">' + str(len(pass_scores)) + '</div>'
+                        '<div style="font-size:9px;color:#059669;text-transform:uppercase;">PASS</div></td>'
+                        '</tr></table>')
 
-  <!-- Stats row -->
-  <div style="padding:20px 28px;border-bottom:1px solid #f0ede8;">
-    <table width="100%" cellpadding="0" cellspacing="0">
-    <tr>
-      <td style="text-align:center;padding:0 8px;">
-        <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;
-             color:#C9A84C;">{stats.get('total',0)}</div>
-        <div style="font-family:Arial,sans-serif;font-size:7px;font-weight:700;
-             letter-spacing:.14em;text-transform:uppercase;color:#AAAAAA;">Prospects</div>
-      </td>
-      <td style="text-align:center;padding:0 8px;">
-        <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;
-             color:#E63946;">{stats.get('priority',0)}</div>
-        <div style="font-family:Arial,sans-serif;font-size:7px;font-weight:700;
-             letter-spacing:.14em;text-transform:uppercase;color:#AAAAAA;">Priority</div>
-      </td>
-      <td style="text-align:center;padding:0 8px;">
-        <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;
-             color:#555;">{stats.get('contacted',0)}</div>
-        <div style="font-family:Arial,sans-serif;font-size:7px;font-weight:700;
-             letter-spacing:.14em;text-transform:uppercase;color:#AAAAAA;">Contacted</div>
-      </td>
-      <td style="text-align:center;padding:0 8px;">
-        <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;
-             color:#1A7A3C;">{stats.get('converted',0)}</div>
-        <div style="font-family:Arial,sans-serif;font-size:7px;font-weight:700;
-             letter-spacing:.14em;text-transform:uppercase;color:#AAAAAA;">Converted</div>
-      </td>
-      <td style="text-align:center;padding:0 8px;">
-        <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;
-             color:#1A7A3C;">${stats.get('revenue',0):,}</div>
-        <div style="font-family:Arial,sans-serif;font-size:7px;font-weight:700;
-             letter-spacing:.14em;text-transform:uppercase;color:#AAAAAA;">Revenue</div>
-      </td>
-    </tr>
-    </table>
-  </div>
+    assoc_section = ''
+    if associations_warm:
+        rows = ''
+        for a in associations_warm:
+            rows += ('<div style="padding:8px 14px;border-left:3px solid #C9A84C;'
+                     'margin-bottom:6px;background:#FFFBEB;font-size:12px;color:#0F1E2E;">'
+                     '<b>' + a.get('name','') + '</b> — ' + a.get('status','').upper() +
+                     '<br><span style="color:#64748B;">' + a.get('member_count','') + ' members</span></div>')
+        assoc_section += ('<p style="font-size:10px;letter-spacing:0.12em;color:#C9A84C;'
+                          'text-transform:uppercase;margin:16px 0 8px;">ASSOCIATIONS — HOT</p>' + rows)
+    if associations_not_yet:
+        rows = ''
+        for a in associations_not_yet[:5]:
+            rows += ('<div style="padding:6px 14px;font-size:11px;color:#64748B;'
+                     'border-bottom:1px solid #F3F4F6;">' +
+                     a.get('name','') + ' — ' + a.get('member_count','') + ' members</div>')
+        assoc_section += ('<p style="font-size:10px;letter-spacing:0.12em;color:#94A3B8;'
+                          'text-transform:uppercase;margin:16px 0 8px;">NOT YET CONTACTED</p>' + rows)
 
-  <!-- Today's to-do -->
-  <div style="padding:20px 28px;border-bottom:1px solid #f0ede8;">
-    <div style="font-family:Arial,sans-serif;font-size:8px;font-weight:700;
-         letter-spacing:.2em;text-transform:uppercase;color:#C9A84C;margin-bottom:12px;">
-      Your Tasks For Today
-    </div>
-    {todos}
-  </div>
+    # Specific todos based on real data
+    todos = []
+    if warm_leads:
+        top = warm_leads[0]
+        todos.append('<b>CALL NOW:</b> ' + top.get('name','') +
+                     ' is a warm lead. Phone: ' + top.get('phone','find on website') +
+                     '. Opening: "I saw you reviewed our HHS scan — wanted to connect before May 11."')
+    if fail_scores:
+        top = fail_scores[0]
+        todos.append('<b>HIGH PRIORITY:</b> ' + top.get('name','') + ' scored ' +
+                     str(top.get('idr_score','')) + '/100. Email auto-queued. Call: ' +
+                     top.get('phone','find contact on their website'))
+    if len(scanned) < 30:
+        todos.append('<b>SCAN MORE:</b> Only ' + str(len(scanned)) + ' prospects scanned. '
+                     'Open ICC Prospects tab and scan 15 more today. Every FAIL score = sales call.')
+    if associations_not_yet:
+        todos.append('<b>ASSOCIATIONS:</b> ' + str(len(associations_not_yet)) +
+                     ' not yet contacted. Follow up on sent emails via Namecheap inbox.')
+    if not todos:
+        todos.append('<b>APPROVE EMAILS:</b> Open ICC Email Queue and approve all pending outreach.')
+        todos.append('<b>LINKEDIN:</b> Post today\'s Observatory data from scan results above.')
 
-  <!-- Follow-ups due -->
-  {'<div style="padding:20px 28px;border-bottom:1px solid #f0ede8;background:#FDF8F0;"><div style="font-family:Arial,sans-serif;font-size:8px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#C47F00;margin-bottom:10px;">Follow-Ups Due (' + str(len(followups)) + ')</div>' + ''.join([f'<div style="font-size:12px;color:#555;padding:5px 0;border-bottom:1px solid #f0e8d8;">{f["prospect_name"]} — contacted {f["sent_at"].strftime("%b %d") if f.get("sent_at") else "recently"}</div>' for f in followups[:5]]) + '</div>' if followups else ''}
+    todos_html = ''.join(
+        '<div style="padding:10px 14px;border-left:3px solid #C9A84C;margin-bottom:8px;'
+        'font-size:12px;color:#1E293B;background:#FAFAF8;">' + t + '</div>'
+        for t in todos)
 
-  <!-- Association opportunities -->
-  {'<div style="padding:20px 28px;border-bottom:1px solid #f0ede8;"><div style="font-family:Arial,sans-serif;font-size:8px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#8A6F2E;margin-bottom:10px;">Associations Not Yet Contacted</div>' + ''.join([f'<div style="font-size:12px;color:#555;padding:4px 0;">{a["name"].split("—")[0].strip()} — {a["member_count"]} members</div>' for a in not_contacted]) + '</div>' if not_contacted else ''}
+    deadline_color = '#DC2626' if days <= 2 else ('#D97706' if days <= 5 else '#C9A84C')
+    if days == 0:
+        days_label = 'DEADLINE PASSED — ENFORCEMENT IS OPEN'
+    else:
+        days_label = str(days) + ' DAYS TO MAY 11 DEADLINE'
 
-  <!-- CTA -->
-  <div style="padding:20px 28px;text-align:center;">
-    <a href="https://idrshield.com/icc"
-       style="display:inline-block;background:#C9A84C;color:#0A0E1A;
-              font-family:Arial,sans-serif;font-size:9px;font-weight:700;
-              letter-spacing:.16em;text-transform:uppercase;
-              padding:13px 32px;text-decoration:none;">
-      Open ICC Command Center →
-    </a>
-  </div>
+    rev = stats.get('revenue', 0)
+    subject = ('ICC Briefing — ' + _today.strftime('%a %b %d') + ' — ' +
+               days_label + ' — ' + str(len(fail_scores)) + ' FAIL · ' +
+               str(len(warn_scores)) + ' WARNING · $' + str(rev) + ' revenue')
 
-  <div style="padding:14px 28px;background:#0A0E1A;">
-    <div style="font-family:Arial,sans-serif;font-size:8px;color:rgba(250,247,242,.25);">
-      ICC · IDR Command Center · idrshield.com · Automated morning briefing
-    </div>
-  </div>
-
-</div>
-</body></html>"""
+    html = ('<!DOCTYPE html><html><head><meta charset="UTF-8"></head>'
+            '<body style="margin:0;padding:0;font-family:Georgia,serif;background:#F0EDE6;">'
+            '<table width="100%" cellpadding="0" cellspacing="0" style="background:#F0EDE6;padding:32px 0;">'
+            '<tr><td align="center">'
+            '<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">'
+            '<tr><td style="background:#0F1E2E;padding:24px 32px;">'
+            '<p style="margin:0 0 2px;font-size:9px;letter-spacing:0.2em;color:#C9A84C;text-transform:uppercase;">ICC &middot; IDR Command Center</p>'
+            '<p style="margin:0;font-size:22px;font-weight:700;color:#F0E8D8;">Morning Briefing &middot; ' + _today.strftime('%A, %B %d') + '</p>'
+            '</td></tr>'
+            '<tr><td style="background:' + deadline_color + ';padding:12px 32px;text-align:center;">'
+            '<p style="margin:0;font-size:12px;font-weight:700;color:#FFFFFF;letter-spacing:0.15em;text-transform:uppercase;">' + days_label + '</p>'
+            '</td></tr>'
+            '<tr><td style="background:#FFFFFF;padding:24px 32px;">'
+            '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
+            '<td align="center" style="padding:8px;">'
+            '<div style="font-size:32px;font-weight:700;color:#C9A84C;">' + str(stats.get('total',0)) + '</div>'
+            '<div style="font-size:9px;letter-spacing:0.1em;color:#94A3B8;text-transform:uppercase;">Prospects</div></td>'
+            '<td align="center" style="padding:8px;">'
+            '<div style="font-size:32px;font-weight:700;color:#DC2626;">' + str(stats.get('priority',0)) + '</div>'
+            '<div style="font-size:9px;letter-spacing:0.1em;color:#94A3B8;text-transform:uppercase;">Priority</div></td>'
+            '<td align="center" style="padding:8px;">'
+            '<div style="font-size:32px;font-weight:700;color:#374151;">' + str(stats.get('contacted',0)) + '</div>'
+            '<div style="font-size:9px;letter-spacing:0.1em;color:#94A3B8;text-transform:uppercase;">Contacted</div></td>'
+            '<td align="center" style="padding:8px;">'
+            '<div style="font-size:32px;font-weight:700;color:#059669;">' + str(stats.get('warm',0)) + '</div>'
+            '<div style="font-size:9px;letter-spacing:0.1em;color:#94A3B8;text-transform:uppercase;">Warm</div></td>'
+            '<td align="center" style="padding:8px;">'
+            '<div style="font-size:32px;font-weight:700;color:#059669;">$' + str(rev) + '</div>'
+            '<div style="font-size:9px;letter-spacing:0.1em;color:#94A3B8;text-transform:uppercase;">Revenue</div></td>'
+            '</tr></table></td></tr>'
+            '<tr><td style="background:#FFFFFF;padding:0 32px 24px;">'
+            '<p style="font-size:10px;letter-spacing:0.12em;color:#C9A84C;text-transform:uppercase;margin:16px 0 8px;">YOUR ACTIONS TODAY</p>'
+            + todos_html + warm_section + fail_section + scan_section + assoc_section +
+            '<div style="text-align:center;margin:24px 0 8px;">'
+            '<a href="https://idrshield.com/icc.html" '
+            'style="background:#C9A84C;color:#0F1E2E;font-size:11px;font-weight:700;'
+            'letter-spacing:0.12em;text-transform:uppercase;padding:12px 32px;text-decoration:none;display:inline-block;">'
+            'OPEN ICC COMMAND CENTER &#8594;</a></div>'
+            '</td></tr>'
+            '<tr><td style="background:#1a2435;padding:16px 32px;text-align:center;">'
+            '<p style="margin:0;font-size:10px;color:#64748B;">ICC &middot; IDR Command Center &middot; idrshield.com</p>'
+            '</td></tr>'
+            '</table></td></tr></table></body></html>')
 
     try:
-        import sendgrid
-        from sendgrid.helpers.mail import Mail
+        import sendgrid as sg_mod
+        from sendgrid.helpers.mail import Mail, Email, To, Content
         msg = Mail(
-            from_email=('hello@idrshield.com',
-                        'ICC — IDR Command Center'),
-            to_emails=BRIEFING_TO,
+            from_email=Email('hello@idrshield.com', 'ICC — IDR Command Center'),
+            to_emails=To(BRIEFING_TO),
             subject=subject,
-            html_content=html,
         )
-        sg = sendgrid.SendGridAPIClient(api_key=SENDGRID_KEY)
-        r  = sg.client.mail.send.post(request_body=msg.get())
-        print(f'[ICC_WORKER] Daily briefing sent to {BRIEFING_TO} — {r.status_code}')
-        from icc_database import log_activity
-        log_activity('briefing_sent', f'Morning briefing — {days} days left')
+        msg.content = [Content('text/html', html)]
+        client = sg_mod.SendGridAPIClient(api_key=SENDGRID_KEY)
+        r = client.client.mail.send.post(request_body=msg.get())
+        print(f'[ICC_WORKER] Briefing sent — {r.status_code}')
+        log_activity('briefing_sent',
+                     f'Briefing — {days} days left — {len(fail_scores)} FAIL — {len(warm_leads)} warm')
     except Exception as e:
-        print(f'[ICC_WORKER] Briefing error: {e}')
+        print(f'[ICC_WORKER] Briefing send error: {e}')
 
 
-def _generate_daily_todos(stats, followups, not_contacted, days):
-    """Generate today's to-do list using Claude AI."""
-    if not ANTHROPIC_KEY:
-        # Fallback static todos
-        items = []
-        if stats.get('priority', 0) > 0:
-            items.append(f'Contact {min(stats["priority"],10)} priority prospects (score below 60) — messages are pre-written in ICC')
-        if followups:
-            items.append(f'Send follow-ups to {len(followups)} contacts who haven\'t responded in 3+ days')
-        if not_contacted:
-            items.append(f'Pitch {not_contacted[0]["name"].split("—")[0].strip()} — {not_contacted[0]["member_count"]} members waiting')
-        items.append(f'Post LinkedIn content about the {days}-day deadline')
-        items.append('Run ICC scanner on 20 more healthcare websites')
-        return ''.join([f'<div style="font-size:13px;color:#333;padding:6px 0;border-bottom:1px solid #f0ede8;padding-left:16px;position:relative;"><span style="position:absolute;left:0;color:#C9A84C;">→</span>{item}</div>' for item in items])
-
-    try:
-        prompt = f"""You are the ICC AI advisor for IDR Shield, an HHS healthcare accessibility compliance company. 
-Generate exactly 5 specific action items for today based on this campaign data:
-- Days to May 11 deadline: {days}
-- Total prospects in database: {stats.get('total',0)}
-- Priority prospects (score<60): {stats.get('priority',0)}
-- Contacted so far: {stats.get('contacted',0)}
-- Converted to clients: {stats.get('converted',0)}
-- Revenue: ${stats.get('revenue',0):,}
-- Follow-ups due: {len(followups)}
-- Associations not yet contacted: {len(not_contacted)}
-
-Return ONLY a JSON array of 5 strings, each a specific action item. No other text."""
-
-        payload = json.dumps({
-            'model': 'claude-sonnet-4-6',
-            'max_tokens': 400,
-            'messages': [{'role': 'user', 'content': prompt}]
-        }).encode()
-        req = urllib.request.Request(
-            'https://api.anthropic.com/v1/messages',
-            data=payload,
-            headers={
-                'x-api-key': ANTHROPIC_KEY,
-                'anthropic-version': '2023-06-01',
-                'Content-Type': 'application/json',
-            },
-            method='POST'
-        )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            data = json.loads(r.read())
-        text  = data['content'][0]['text'].strip()
-        clean = text.replace('```json','').replace('```','').strip()
-        items = json.loads(clean)
-        return ''.join([
-            f'<div style="font-size:13px;color:#333;padding:6px 0;'
-            f'border-bottom:1px solid #f0ede8;padding-left:16px;position:relative;">'
-            f'<span style="position:absolute;left:0;color:#C9A84C;">→</span>{item}</div>'
-            for item in items
-        ])
-    except Exception as e:
-        print(f'[ICC_WORKER] AI todo error: {e}')
-        return '<div style="font-size:12px;color:#888;padding:8px 0;">Open ICC to see today\'s priorities.</div>'
-
-
-# ── MAIN CYCLE ────────────────────────────────────────────────────────────────
 
 def run_icc_cycle():
     """
