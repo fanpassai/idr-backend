@@ -88,44 +88,63 @@ def icc_get_prospect(pid):
 @icc_bp.route('/api/prospects/scan/<pid>', methods=['POST'])
 @cross_origin()
 def icc_scan_prospect(pid):
-    """Save scan score from browser-side scan to DB."""
+    """Save scan result — upserts prospect then saves score permanently."""
     if not _auth(request): return _unauth()
     body = request.get_json(silent=True) or {}
-    score = body.get('score')
-    criticals = body.get('criticals', 0)
-    website = body.get('website', '')
-    name = body.get('name', '')
+    score    = body.get('score')
+    criticals = int(body.get('criticals', 0))
+    website  = body.get('website', '')
+    name     = body.get('name', '')
+    total    = int(body.get('total_issues', 0))
 
-    # If score provided by browser — just save it
-    if score is not None:
-        try:
-            from icc_database import upsert_prospect, update_prospect_score
-            upsert_prospect({
-                'id': pid, 'name': name, 'website': website,
-                'idr_score': int(score), 'critical_count': int(criticals),
-                'scanned': True,
-            })
-        except Exception as e:
-            print(f'[ICC] Score save error: {e}')
-        return jsonify({'success': True, 'prospect': {
-            'id': pid, 'idr_score': score, 'critical_count': criticals, 'scanned': True
-        }})
+    if score is None:
+        return jsonify({'success': False, 'error': 'No score provided'}), 400
 
-    # Fallback: try DB lookup
     try:
-        from icc_database import get_prospect_by_id
-        from icc_worker import scan_prospect
-        p = get_prospect_by_id(pid)
-        if p:
-            ok = scan_prospect(p)
-            updated = get_prospect_by_id(pid) or {}
-            for k, v in updated.items():
-                if hasattr(v, 'isoformat'): updated[k] = v.isoformat()
-            return jsonify({'success': ok, 'prospect': updated})
-    except Exception:
-        pass
+        from icc_database import save_scan_result
+        ok = save_scan_result(pid, website, name, int(score), criticals, total)
 
-    return jsonify({'success': False, 'error': 'No score provided and prospect not in DB'}), 400
+        # Auto-queue FAIL email if score < 60
+        if ok and int(score) < 60:
+            try:
+                from icc_email_queue import generate_prospect_email
+                from icc_database import get_prospect_by_id
+                p = get_prospect_by_id(pid) or {
+                    'id': pid, 'name': name, 'website': website,
+                    'idr_score': score, 'critical_count': criticals,
+                    'org_type': 'fqhc', 'city': '', 'state': 'FL'
+                }
+                email_data = generate_prospect_email(p)
+                # Store in queue table
+                from database import get_conn
+                conn = get_conn()
+                if conn:
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute("""
+                                INSERT INTO icc_email_queue
+                                    (prospect_id, prospect_name, subject,
+                                     body_text, idr_score, status, created_at)
+                                VALUES (%s,%s,%s,%s,%s,'pending',NOW())
+                                ON CONFLICT DO NOTHING
+                            """, (pid, name, email_data['subject'],
+                                   email_data['body_text'], score))
+                    except Exception:
+                        pass
+                    finally:
+                        conn.close()
+            except Exception as e:
+                print(f'[ICC] Auto-queue error: {e}')
+
+        return jsonify({
+            'success': ok,
+            'prospect': {
+                'id': pid, 'idr_score': score,
+                'critical_count': criticals, 'scanned': True
+            }
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @icc_bp.route('/api/harvest', methods=['POST'])
@@ -420,6 +439,74 @@ def icc_playbook():
 
 # ── Health check ──────────────────────────────────────────────────────────────
 
+
+@icc_bp.route('/api/prospects/seed', methods=['POST'])
+@cross_origin()
+def icc_seed_prospects():
+    """Bulk save browser-loaded prospects to DB so scans persist permanently."""
+    if not _auth(request): return _unauth()
+    body = request.get_json(silent=True) or {}
+    prospects = body.get('prospects', [])
+    if not prospects:
+        return jsonify({'success': False, 'error': 'No prospects provided'}), 400
+    try:
+        from icc_database import bulk_upsert_prospects
+        saved = bulk_upsert_prospects(prospects)
+        return jsonify({'success': True, 'saved': saved, 'total': len(prospects)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@icc_bp.route('/api/prospects/scanned', methods=['GET'])
+@cross_origin()
+def icc_get_scanned():
+    """Return all prospects that have been scanned with scores."""
+    if not _auth(request): return _unauth()
+    try:
+        from icc_database import get_scanned_prospects
+        prospects = get_scanned_prospects(limit=200)
+        return jsonify({'success': True, 'prospects': prospects, 'count': len(prospects)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@icc_bp.route('/api/sendgrid/webhook', methods=['POST'])
+@cross_origin()
+def icc_sendgrid_webhook():
+    """Receive SendGrid open/click/bounce events and update prospect records."""
+    events = request.get_json(silent=True) or []
+    if not isinstance(events, list):
+        events = [events]
+
+    from database import get_conn
+    for event in events:
+        event_type = event.get('event', '')
+        email_to   = event.get('email', '')
+        sg_tags    = event.get('unique_args', {}) or {}
+        prospect_id = sg_tags.get('prospect_id', '')
+
+        if event_type in ('open', 'click') and prospect_id:
+            try:
+                conn = get_conn()
+                if conn:
+                    with conn.cursor() as cur:
+                        status = 'clicked' if event_type == 'click' else 'opened'
+                        cur.execute("""
+                            UPDATE icc_outreach SET
+                                status=%s, updated_at=NOW()
+                            WHERE prospect_id=%s AND status='sent'
+                        """, (status, prospect_id))
+                    conn.close()
+
+                    # Log warm lead activity
+                    from icc_database import log_activity
+                    log_activity('email_opened' if event_type == 'open' else 'email_clicked',
+                                 f'Prospect {prospect_id} {event_type}ed email — WARM LEAD')
+            except Exception as e:
+                print(f'[ICC_WEBHOOK] Error: {e}')
+
+    return jsonify({'success': True}), 200
+
 @icc_bp.route('/health', methods=['GET'])
 def icc_health():
     return jsonify({'status': 'ICC operational',
@@ -482,6 +569,22 @@ def icc_approve_association(qid):
     body = request.get_json(silent=True) or {}
     from icc_email_queue import approve_and_send_association
     result = approve_and_send_association(qid, edited_body=body.get('body_text'))
+    if result.get('success'):
+        try:
+            from icc_database import mark_association_contacted
+            from database import get_conn
+            conn = get_conn()
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        'SELECT assoc_id, contact_email FROM icc_association_queue WHERE id=%s',
+                        (qid,))
+                    row = cur.fetchone()
+                    if row:
+                        mark_association_contacted(row[0], row[1] or '')
+                conn.close()
+        except Exception as _e:
+            print(f'[ICC] mark_assoc error: {_e}')
     return jsonify(result)
 
 
