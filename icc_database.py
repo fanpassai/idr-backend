@@ -217,6 +217,7 @@ def _seed_associations():
 # ── Prospect operations ───────────────────────────────────────────────────────
 
 def upsert_prospect(p: dict) -> bool:
+    """Upsert a prospect — preserves existing score if not provided."""
     conn = get_conn()
     if not conn: return False
     try:
@@ -227,15 +228,166 @@ def upsert_prospect(p: dict) -> bool:
                      phone, website, source, updated_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
                 ON CONFLICT (id) DO UPDATE SET
-                    name=EXCLUDED.name, phone=EXCLUDED.phone,
-                    website=EXCLUDED.website, updated_at=NOW()
-            """, (p['id'], p['name'], p['org_type'], p.get('address',''),
-                  p.get('city',''), p.get('state',''), p.get('zip',''),
-                  p.get('phone',''), p.get('website',''), p.get('source','')))
+                    name=EXCLUDED.name,
+                    phone=COALESCE(EXCLUDED.phone, icc_prospects.phone),
+                    website=COALESCE(EXCLUDED.website, icc_prospects.website),
+                    updated_at=NOW()
+            """, (p['id'], p['name'], p.get('org_type','fqhc'),
+                  p.get('address',''), p.get('city',''), p.get('state',''),
+                  p.get('zip',''), p.get('phone',''), p.get('website',''),
+                  p.get('source','browser')))
         return True
     except Exception as e:
         print(f'[ICC_DB] upsert_prospect error: {e}')
         return False
+    finally:
+        conn.close()
+
+
+def bulk_upsert_prospects(prospects: list) -> int:
+    """Upsert a list of prospects in one transaction. Returns count saved."""
+    if not prospects: return 0
+    conn = get_conn()
+    if not conn: return 0
+    saved = 0
+    try:
+        with conn.cursor() as cur:
+            for p in prospects:
+                try:
+                    cur.execute("""
+                        INSERT INTO icc_prospects
+                            (id, name, org_type, address, city, state, zip,
+                             phone, website, source, updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                        ON CONFLICT (id) DO UPDATE SET
+                            name=EXCLUDED.name,
+                            phone=COALESCE(EXCLUDED.phone, icc_prospects.phone),
+                            website=COALESCE(EXCLUDED.website, icc_prospects.website),
+                            updated_at=NOW()
+                    """, (p['id'], p['name'], p.get('org_type','fqhc'),
+                          p.get('address',''), p.get('city',''), p.get('state',''),
+                          p.get('zip',''), p.get('phone',''), p.get('website',''),
+                          p.get('source','browser')))
+                    saved += 1
+                except Exception:
+                    pass
+        print(f'[ICC_DB] bulk_upsert: {saved}/{len(prospects)} prospects saved')
+        return saved
+    except Exception as e:
+        print(f'[ICC_DB] bulk_upsert error: {e}')
+        return 0
+    finally:
+        conn.close()
+
+
+def save_scan_result(prospect_id: str, website: str, name: str,
+                     score: int, criticals: int, total_issues: int = 0) -> bool:
+    """Save a scan result — upserts the prospect row first then sets score."""
+    conn = get_conn()
+    if not conn: return False
+    try:
+        with conn.cursor() as cur:
+            # Ensure the prospect row exists
+            cur.execute("""
+                INSERT INTO icc_prospects (id, name, org_type, website, source, updated_at)
+                VALUES (%s, %s, 'fqhc', %s, 'browser', NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    website=COALESCE(EXCLUDED.website, icc_prospects.website),
+                    updated_at=NOW()
+            """, (prospect_id, name or prospect_id, website))
+            # Now set the score
+            cur.execute("""
+                UPDATE icc_prospects SET
+                    idr_score=%s, critical_count=%s,
+                    scanned=TRUE, scanned_at=NOW(),
+                    priority=(%s < 60),
+                    updated_at=NOW()
+                WHERE id=%s
+            """, (score, criticals, score, prospect_id))
+        log_activity('scan_complete',
+                     f'{name}: {score}/100 ({criticals} critical)'
+                     + (' — PRIORITY' if score < 60 else ''))
+        return True
+    except Exception as e:
+        print(f'[ICC_DB] save_scan_result error: {e}')
+        return False
+    finally:
+        conn.close()
+
+
+def mark_association_contacted(assoc_id: str, email: str = '') -> bool:
+    """Mark an association as contacted after email is sent."""
+    conn = get_conn()
+    if not conn: return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE icc_associations SET
+                    status='contacted',
+                    pitch_sent_at=NOW(),
+                    contact_email=COALESCE(%s, contact_email),
+                    updated_at=NOW()
+                WHERE id=%s AND status='not_contacted'
+            """, (email or None, assoc_id))
+        return True
+    except Exception as e:
+        print(f'[ICC_DB] mark_association_contacted error: {e}')
+        return False
+    finally:
+        conn.close()
+
+
+def get_scanned_prospects(limit=100) -> list:
+    """Get all prospects that have been scanned with scores."""
+    conn = get_conn()
+    if not conn: return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, name, org_type, city, state, phone, website,
+                       idr_score, critical_count, scanned_at, priority
+                FROM icc_prospects
+                WHERE scanned=TRUE AND idr_score IS NOT NULL
+                ORDER BY priority DESC, idr_score ASC
+                LIMIT %s
+            """, (limit,))
+            cols = [d[0] for d in cur.description]
+            rows = []
+            for r in cur.fetchall():
+                row = dict(zip(cols, r))
+                if row.get('scanned_at'):
+                    row['scanned_at'] = row['scanned_at'].isoformat()
+                rows.append(row)
+            return rows
+    except Exception as e:
+        print(f'[ICC_DB] get_scanned_prospects error: {e}')
+        return []
+    finally:
+        conn.close()
+
+
+def get_warm_leads() -> list:
+    """Get prospects with email opens or clicks — warm leads."""
+    conn = get_conn()
+    if not conn: return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.id, p.name, p.website, p.idr_score, p.phone,
+                       o.status, o.sent_at, o.notes
+                FROM icc_prospects p
+                JOIN icc_outreach o ON o.prospect_id = p.id
+                WHERE o.status IN ('opened', 'clicked', 'replied', 'interested')
+                ORDER BY o.updated_at DESC
+                LIMIT 20
+            """)
+            if cur.description:
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, r)) for r in cur.fetchall()]
+            return []
+    except Exception as e:
+        print(f'[ICC_DB] get_warm_leads error: {e}')
+        return []
     finally:
         conn.close()
 
@@ -339,13 +491,23 @@ def get_icc_stats() -> dict:
             """)
             activity = [{'type':r[0],'detail':r[1],
                          'time':r[2].strftime('%H:%M') if r[2] else ''} for r in cur.fetchall()]
-        deadline = datetime(2026, 5, 11, tzinfo=timezone.utc)
-        days_left = max(0, (deadline - datetime.now(timezone.utc)).days)
+        from datetime import date as _date
+        _today = _date.today()
+        _dl = _date(2026, 5, 11)
+        days_left = max(0, (_dl - _today).days)
+        # Association contacted count
+        cur.execute("SELECT COUNT(*) FROM icc_associations WHERE status != 'not_contacted'")
+        assoc_contacted = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM icc_associations WHERE status = 'not_contacted'")
+        assoc_not_contacted = cur.fetchone()[0]
+
         return {
             'total': total, 'scanned': scanned, 'priority': priority,
             'contacted': contacted, 'converted': converted,
             'revenue': revenue, 'warm': warm,
             'days_left': days_left, 'activity': activity,
+            'assoc_contacted': assoc_contacted,
+            'assoc_not_contacted': assoc_not_contacted,
         }
     except Exception as e:
         print(f'[ICC_DB] stats error: {e}')
