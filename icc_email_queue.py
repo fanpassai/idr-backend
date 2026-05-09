@@ -249,156 +249,187 @@ def init_email_queue_table():
 
 # ── EMAIL GENERATORS ──────────────────────────────────────────────────────────
 
-def _days_left():
+def _days_past_deadline():
+    """Returns how many days have passed since May 11 2026."""
     from datetime import date
     today = date.today()
-    deadline_date = date(2026, 5, 11)
-    return max(0, (deadline_date - today).days)
+    deadline = date(2026, 5, 11)
+    return max(0, (today - deadline).days)
+
+
+def save_to_queue(email_data: dict, auto_send: bool = False) -> bool:
+    """Save generated email to queue. Auto-sends if score < 50 and contact email known."""
+    if auto_send and email_data.get('idr_score', 100) < 50:
+        to_email = email_data.get('contact_email', '')
+        if to_email:
+            return _send_via_sendgrid(
+                to_email=to_email,
+                subject=email_data['subject'],
+                body_text=email_data['body_text'],
+                prospect_id=email_data.get('prospect_id', ''),
+                institutional=True,
+            )
+    return queue_prospect_email(email_data)
+
+
+def generate_followup_email(outreach_record: dict) -> dict:
+    """48-hour follow-up — enforcement is now open."""
+    name      = outreach_record.get('prospect_name', 'Healthcare Organization')
+    score     = outreach_record.get('idr_score', 0)
+    domain    = (outreach_record.get('website') or '').replace('https://','').replace('http://','').rstrip('/')
+    days_past = _days_past_deadline()
+    subject   = f"Following up: {name} — Enforcement Window Now Open"
+    body = f"""Hi,
+
+I wanted to follow up on the accessibility scan results I sent earlier.
+
+The HHS Section 504 enforcement deadline passed on May 11, 2026 — {days_past} days ago. Organizations without a documented compliance record before that date are now in a more difficult position than those that acted proactively.
+
+What this means for {name}: the window to establish a pre-enforcement record has closed. What remains is the ability to demonstrate good faith remediation — which requires documentation, not just intent.
+
+Domain: {domain or name}
+Score: {score}/100 — Registry Status: ABSENT
+
+Every day without a documented record is another day of exposure in an active enforcement environment. We can still establish your compliance record. $497. 48-hour delivery.
+
+Hans-Peter Nkansah
+Institute of Digital Remediation
+hans-peter@instituteofdigitalremediation.org"""
+    return {
+        'prospect_id': outreach_record.get('prospect_id', ''),
+        'prospect_name': name,
+        'subject': subject,
+        'body_text': body,
+        'idr_score': score,
+        'criticals': 0,
+        'is_followup': True,
+    }
 
 
 def generate_prospect_email(prospect: dict) -> dict:
-    """Generate a personalized outreach email — FAIL / WARNING / PASS versions."""
-    name    = prospect.get('name', 'Healthcare Organization')
-    city    = prospect.get('city', '')
-    state   = prospect.get('state', '')
-    score   = prospect.get('idr_score')
-    crits   = prospect.get('criticals', 0) or 0
-    otype   = prospect.get('org_type', 'fqhc')
-    days    = _days_left()
-    domain  = (prospect.get('website') or '').replace('https://','').replace('http://','').rstrip('/')
+    """
+    Generate personalized outreach — FAIL / WARNING / PASS / NO SCORE.
+    Post-deadline enforcement language. No countdown.
+    """
+    name      = prospect.get('name', 'Healthcare Organization')
+    city      = prospect.get('city', '')
+    state     = prospect.get('state', '')
+    score     = prospect.get('idr_score')
+    crits     = prospect.get('critical_count', 0) or prospect.get('criticals', 0) or 0
+    otype     = prospect.get('org_type', 'fqhc')
+    olane     = prospect.get('org_lane', 'healthcare')
+    domain    = (prospect.get('website') or '').replace('https://','').replace('http://','').rstrip('/')
+    days_past = _days_past_deadline()
 
     type_map = {
-        'fqhc': 'health center',
-        'nh':   'nursing facility',
-        'hha':  'home health agency',
+        'fqhc':   'health center',
+        'nh':     'nursing facility',
+        'hha':    'home health agency',
+        'city':   'city government',
+        'county': 'county government',
     }
     org_label = type_map.get(otype, 'healthcare organization')
-    location  = f"{city}, {state}" if city and state else (state or 'Florida')
+    location  = f"{city}, {state}" if city and state else (state or '')
 
-    # ── FAIL: score < 60 ──────────────────────────────────────────────────────
+    # FAIL: score < 60
     if score is not None and score < 60:
-        subject = f"HHS Scan Alert: {name} Scored {score}/100 — Registry Status: ABSENT"
+        subject = f"HHS Accessibility Scan: {name} — Score {score}/100 — Registry Status: ABSENT"
         body = f"""Hi,
 
-Most healthcare organizations are breathing easy right now. The DOJ just extended the ADA website deadline to 2027, and compliance teams across the country are standing down.
+The HHS Section 504 enforcement deadline passed on May 11, 2026 — {days_past} days ago.
 
-HHS did not follow suit.
-
-Section 504 — which governs every {org_label} receiving federal funding — still hits a hard wall on May 11, 2026. That is {days} days from today. While your peers are relaxing into a false sense of security, the enforcement window is opening.
-
-I ran an external HHS accessibility scan of {name}'s website this morning.
+I ran an independent accessibility scan of {name}'s website.
 
 Domain: {domain or name}
 Score: {score}/100
 Critical violations: {crits}
 Registry Status: ABSENT
-Deadline: May 11, 2026
 
-A score of {score}/100 matches the violation profile that plaintiff firm automation targets first. These scans take under a second to run. On May 12, they become demand letters.
+A score of {score}/100 places {name} in the highest-exposure category. The {crits} critical violation{"s" if crits != 1 else ""} on your site match the violation profile that plaintiff firm automation and HHS OCR investigations target first.
 
-The law does not care whether you were aware. It cares whether you are Verified.
+The enforcement window is now open. Every covered entity without a documented audit record is currently exposed. The distinction between organizations that faced OCR action and those that did not often comes down to one thing: whether they had a documented record of awareness and action before a complaint was filed.
 
-We publish independent third-party HHS audit records — a SHA-256 timestamped, cryptographically sealed document that establishes your Good Faith Evidence position before OCR. When your Registry status moves from ABSENT to ACTIVE, you have documented proof that your organization was aware, acted, and is on record.
-
-Initial audit: $497. Delivered within 48 hours. Your Registry ID is issued the same day.
-
-Activate at idrshield.com/healthcare. Search {domain or name} on the IDR Registry first — if it says ABSENT, your liability is already visible.
-
-Hans-Peter Nkansah
-Institute of Digital Remediation
-hans-peter@instituteofdigitalremediation.org
-idrshield.com"""
-
-    # ── WARNING: score 60-79 ─────────────────────────────────────────────────
-    elif score is not None and score < 80:
-        subject = f"HHS Compliance Warning: {name} Scored {score}/100 — Not Enough"
-        body = f"""Hi,
-
-You may have seen the news: the DOJ pushed the ADA website deadline to 2027.
-
-Here is what that headline missed: HHS Section 504 did not move. Every {org_label} receiving federal funding still faces a hard enforcement wall on May 11, 2026. That is {days} days from today.
-
-I ran an external HHS accessibility scan of {name}'s website.
-
-Domain: {domain or name}
-Score: {score}/100
-Status: WARNING — Open violations on record
-Registry Status: ABSENT
-Deadline: May 11, 2026
-
-A score of {score}/100 means your organization has documented accessibility violations with no remediation record on file. In an HHS OCR investigation, this is not a neutral position. It is evidence of awareness without action — which is the precise definition of willful neglect under 45 CFR Part 84.
-
-A passing score offers zero protection without documentation. A warning score with no registry record is the worst of both worlds. You are visible to enforcement systems and invisible on the compliance registry.
-
-The IDR Public Registry is the difference between "we tried" and "we have proof."
-
-We publish independent third-party HHS audit records — a cryptographically sealed compliance document that moves your Registry status from ABSENT to ACTIVE. $497. Delivered within 48 hours.
-
-Search {domain or name} on the IDR Registry at idrshield.com/healthcare. If it says ABSENT, you have {days} days to change that.
-
-Hans-Peter Nkansah
-Institute of Digital Remediation
-hans-peter@instituteofdigitalremediation.org
-idrshield.com"""
-
-    # ── PASS: score 80+ ──────────────────────────────────────────────────────
-    elif score is not None and score >= 80:
-        subject = f"HHS Registry Alert: {name} Scored {score}/100 — But Your Registry Status Is ABSENT"
-        body = f"""Hi,
-
-Your website scored {score}/100 on our HHS accessibility scan. That is a strong technical result.
-
-It does not protect you.
-
-I am reaching out because most healthcare compliance teams believe a clean accessibility score is sufficient for HHS Section 504 compliance. It is not. The regulation does not require a perfect website. It requires documented evidence of compliance posture — and a scan score with no registry record, no SHA-256 audit trail, and no formal remediation documentation is invisible to HHS OCR when a complaint is filed.
-
-Domain: {domain or name}
-Score: {score}/100
-Registry Status: ABSENT
-HHS Deadline: May 11, 2026 — {days} days away
-
-Here is the compliance gap that most organizations do not discover until it is too late: The DOJ just moved the ADA website deadline to 2027. HHS did not. Your peers are relaxing. The enforcement window is opening on May 11 regardless of your score.
-
-An organization with an 80/100 score and no Registry ID has the same legal defense position as one with a 40/100 score and no Registry ID: none.
-
-The IDR Public Registry converts your scan into a dated, cryptographically sealed, publicly verifiable compliance record. That record is the Good Faith Evidence HHS OCR requires. Your {org_label} is {days} days away from the enforcement window. This is the last moment to establish that record before it becomes a remediation document rather than a compliance document.
-
-$497. Delivered within 48 hours. Registry ID issued same day.
-
-Activate at idrshield.com/healthcare.
-
-Hans-Peter Nkansah
-Institute of Digital Remediation
-hans-peter@instituteofdigitalremediation.org
-idrshield.com"""
-
-    # ── NO SCORE: not yet scanned ────────────────────────────────────────────
-    else:
-        subject = f"HHS Registry Alert: {name} — Registry Status ABSENT, {days} Days to Deadline"
-        body = f"""Hi,
-
-The DOJ just extended the ADA website deadline to 2027. Most healthcare compliance teams across the country are standing down.
-
-HHS Section 504 did not move.
-
-Every {org_label} receiving federal funding — Medicare, Medicaid, any HHS-administered program — still faces a hard enforcement wall on May 11, 2026. That is {days} days from today.
-
-Registry Status for {name}: ABSENT
-
-An ABSENT registry status means that if a patient complaint triggers an HHS OCR investigation after May 11, your organization has no documented compliance record on file. No audit trail. No Good Faith Evidence. No defense.
-
-The plaintiff firm automation that scans healthcare websites for accessibility violations does not check whether you believed you had until 2027. It checks whether you are Verified.
-
-We publish independent third-party HHS audit records for {org_label}s nationally — a SHA-256 timestamped, cryptographically sealed compliance document that establishes your Registry status as ACTIVE before the enforcement window opens.
+We publish independent third-party HHS audit records — SHA-256 timestamped, cryptographically sealed, publicly verifiable. When your Registry status moves from ABSENT to ACTIVE, you have documented proof that your organization was aware and acted.
 
 $497. Delivered within 48 hours.
 
-Run a free scan at idrshield.com/healthcare to see your current violation profile. If your Registry status says ABSENT, you have {days} days to change it.
+Search {domain or name} on the IDR Registry at idrshield.com/healthscan. If it says ABSENT, your exposure is documented and public.
 
 Hans-Peter Nkansah
 Institute of Digital Remediation
-hans-peter@instituteofdigitalremediation.org
-idrshield.com"""
+hans-peter@instituteofdigitalremediation.org"""
+
+    # WARNING: score 60-79
+    elif score is not None and score < 80:
+        subject = f"HHS Compliance Record Missing: {name} — Score {score}/100, Registry ABSENT"
+        body = f"""Hi,
+
+I want to make sure you have the complete picture on {name}'s current compliance posture.
+
+Domain: {domain or name}
+Score: {score}/100 — WARNING
+Registry Status: ABSENT
+Enforcement status: Active since May 11, 2026
+
+A score of {score}/100 means your organization has documented accessibility violations with no remediation record on file. The HHS Section 504 enforcement window opened {days_past} days ago.
+
+Here is the legal distinction that matters: under 45 CFR Part 84, willful neglect is defined by the absence of documented remediation effort, not by the presence of violations. An organization with a WARNING score and no Registry record is in the most legally precarious position — visible to enforcement systems, invisible on the compliance registry.
+
+A documented record moves you from exposure to defensibility. The record is what HHS OCR asks for when a complaint is filed. Not the score. The record.
+
+We publish independent third-party HHS audit records. $497. Delivered within 48 hours.
+
+Hans-Peter Nkansah
+Institute of Digital Remediation
+hans-peter@instituteofdigitalremediation.org"""
+
+    # PASS: score 80+
+    elif score is not None and score >= 80:
+        subject = f"Registry Alert: {name} Scored {score}/100 — But Registry Status Is ABSENT"
+        body = f"""Hi,
+
+{name}'s website scored {score}/100 on our independent HHS accessibility scan. That is a strong technical result.
+
+It does not protect you.
+
+Domain: {domain or name}
+Score: {score}/100
+Registry Status: ABSENT
+
+Here is the compliance gap that most organizations do not discover until it is too late: HHS OCR does not ask for your scan score when a complaint is filed. They ask for your documented compliance record. A scan score with no audit trail, no SHA-256 timestamp, and no formal remediation documentation provides no legal defense.
+
+The enforcement window opened {days_past} days ago. An organization with an 80/100 score and no Registry ID has the same legal defense position as one with a 40/100 score and no Registry ID: none.
+
+The IDR Public Registry converts your existing compliance posture into a dated, cryptographically sealed, publicly verifiable record. That record is the Good Faith Evidence HHS OCR requires.
+
+$497. Delivered within 48 hours.
+
+Hans-Peter Nkansah
+Institute of Digital Remediation
+hans-peter@instituteofdigitalremediation.org"""
+
+    # NO SCORE
+    else:
+        subject = f"HHS Registry Alert: {name} — Registry Status ABSENT"
+        body = f"""Hi,
+
+The HHS Section 504 digital accessibility enforcement window opened on May 11, 2026.
+
+Registry Status for {name}: ABSENT
+
+An ABSENT registry status means that if a patient or constituent complaint triggers an HHS OCR investigation, your organization has no documented compliance record on file. No audit trail. No Good Faith Evidence. No defense.
+
+The enforcement window is now active. The organizations that will face the least exposure are not those with perfect websites — they are those with documented records of awareness and action.
+
+We publish independent third-party HHS audit records for {org_label}s nationally. SHA-256 timestamped. Cryptographically sealed. Publicly verifiable.
+
+$497. Delivered within 48 hours.
+
+Run a free scan at idrshield.com/healthscan to see your current violation profile.
+
+Hans-Peter Nkansah
+Institute of Digital Remediation
+hans-peter@instituteofdigitalremediation.org"""
 
     return {
         'prospect_id':    prospect.get('id', ''),
@@ -409,18 +440,19 @@ idrshield.com"""
         'subject':        subject,
         'body_text':      body,
         'idr_score':      score,
-        'criticals':      crits,
+        'critical_count': crits,
+        'contact_email':  prospect.get('contact_email', ''),
     }
 
 
 def generate_association_emails() -> list:
     """Generate pitch emails for all 10 associations, named contacts, HTML-ready."""
-    days = _days_left()
+    days_past = _days_past_deadline()
 
     def _body(org, serves, named_person, role, specific_angle):
-        return f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days} days away. {specific_angle}
+        return f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days_past} days since the May 11 deadline past the May 11 enforcement deadline. {specific_angle}
 
-HHS 89 FR 40066, published July 8, 2024, requires WCAG 2.1 AA compliance for every covered entity website, patient portal, and digital intake tool. For {org} members, this is not a future obligation. It is an active enforcement window opening in {days} days.
+HHS 89 FR 40066, published July 8, 2024, requires WCAG 2.1 AA compliance for every covered entity website, patient portal, and digital intake tool. For {org} members, this is not a future obligation. It is an active enforcement window opening in {days_past} days since the May 11 deadline.
 
 The risk most organizations do not anticipate is not the violations themselves. It is the absence of documentation. An organization that has a dated, independently verified audit record on file is in a fundamentally stronger position when OCR opens an investigation than one with nothing documented at all.
 
@@ -512,7 +544,7 @@ Would a member alert be useful for your next communication?"""
             'named_title': 'American Health Law Association',
             'subject': 'Guest Article: HHS Section 504 Digital Compliance, Healthcare Counsel Alert',
             'salutation': 'AHLA Publications Team',
-            'body': f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days} days away. I would like to submit a guest article for Health Law Daily or The Health Lawyer, framed specifically for healthcare counsel.
+            'body': f"""The May 11, 2026 HHS Section 504 digital accessibility deadline is {days_past} days since the May 11 deadline past the May 11 enforcement deadline. I would like to submit a guest article for Health Law Daily or The Health Lawyer, framed specifically for healthcare counsel.
 
 The piece is titled "The May 11 HHS Digital Accessibility Deadline: What Covered Entities Need Documented Before Enforcement Opens." It runs approximately 700 words and covers the regulatory basis in HHS 89 FR 40066, the covered entity categories, what constitutes a defensible compliance record in an OCR investigation, and why absence of documentation is more damaging than imperfect compliance.
 
@@ -559,7 +591,7 @@ Would this be appropriate for an upcoming issue?"""
 
 The article is titled "The May 11 HHS Digital Accessibility Deadline: What Healthcare Organizations Need Documented Before Enforcement Opens." It runs approximately 700 words and covers the regulatory basis, which entities are covered, what OCR looks for during an investigation, and what documentation puts an organization in a defensible position.
 
-JD Supra reaches 250,000 legal and compliance professionals. With {days} days until enforcement opens, this is directly actionable for your readers today.
+JD Supra reaches 250,000 legal and compliance professionals. With {days_past} days since the May 11 deadline until enforcement opens, this is directly actionable for your readers today.
 
 I run the Institute of Digital Remediation. We publish independent third-party HHS accessibility audit records for healthcare organizations. I can submit the full article within 24 hours.
 
@@ -860,7 +892,7 @@ def _body_to_html(text: str) -> str:
 def _build_html_email(salutation: str, body_text: str, subject: str,
                        institutional: bool = False) -> str:
     """Wrap plain text body in the elite HTML template."""
-    days = _days_left()
+    days_past = _days_past_deadline()
     body_html = _body_to_html(body_text)
     sig_email = FROM_EMAIL_INST if institutional else FROM_EMAIL
     return HTML_EMAIL_TEMPLATE.format(
