@@ -74,6 +74,15 @@ db_available = init_db()
 init_email_queue()
 init_auth_schema()
 icc_db_available = init_icc_db()
+
+# CRITICAL FIX: Seed prospects at app startup — not when browser opens.
+# This is what was missing before. DB has data before anyone opens ICC.
+try:
+    from icc_database import startup_seed
+    startup_seed()
+except Exception as _seed_e:
+    print(f'[ICC_SEED] Startup seed error: {_seed_e}')
+
 try:
     from icc_email_queue import init_email_queue_table, queue_association_emails
     init_email_queue_table()
