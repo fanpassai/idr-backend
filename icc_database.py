@@ -957,7 +957,10 @@ def get_icc_stats() -> dict:
                 """)
                 activity = [
                     {'type': r[0], 'detail': r[1],
-                     'time': r[2].strftime('%H:%M') if r[2] else ''}
+                     'time': (
+                         (r[2] - __import__('datetime').timedelta(hours=4)).strftime('%I:%M %p')
+                         if r[2] else ''
+                     )}
                     for r in cur.fetchall()
                 ]
             except Exception as e:
