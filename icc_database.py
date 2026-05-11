@@ -660,63 +660,54 @@ def upsert_prospect(p: dict) -> bool:
 
 def bulk_upsert_prospects(prospects: list) -> int:
     """
-    Bulk upsert with explicit commit and per-record error isolation.
-    Uses savepoints so one bad record never kills the batch.
+    Bulk upsert. autocommit=True so each statement is independent.
+    Each record gets its own cursor so one failure never affects others.
     """
     if not prospects:
         return 0
-    conn = get_conn()
-    if not conn:
-        print('[ICC_DB] bulk_upsert: no DB connection')
-        return 0
     saved = 0
-    try:
-        with conn.cursor() as cur:
-            for i, p in enumerate(prospects):
-                # Skip records with missing required fields
-                pid  = str(p.get('id') or '').strip()
-                name = str(p.get('name') or '').strip()
-                if not pid or not name:
-                    continue
-                try:
-                    cur.execute("SAVEPOINT sp_%d" % i)
-                    cur.execute("""
-                        INSERT INTO icc_prospects
-                            (id, name, org_type, org_lane, address, city, state,
-                             zip, phone, website, source, updated_at)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
-                        ON CONFLICT (id) DO UPDATE SET
-                            name=EXCLUDED.name,
-                            phone=COALESCE(NULLIF(EXCLUDED.phone,''), icc_prospects.phone),
-                            website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website),
-                            updated_at=NOW()
-                    """, (
-                        pid, name,
-                        str(p.get('org_type') or 'fqhc'),
-                        str(p.get('org_lane') or 'healthcare'),
-                        str(p.get('address') or ''),
-                        str(p.get('city') or ''),
-                        str(p.get('state') or ''),
-                        str(p.get('zip') or ''),
-                        str(p.get('phone') or ''),
-                        str(p.get('website') or ''),
-                        str(p.get('source') or 'seed'),
-                    ))
-                    cur.execute("RELEASE SAVEPOINT sp_%d" % i)
-                    saved += 1
-                except Exception as row_err:
-                    print(f'[ICC_DB] Row {i} failed ({pid}): {row_err}')
-                    try:
-                        cur.execute("ROLLBACK TO SAVEPOINT sp_%d" % i)
-                    except Exception:
-                        pass
-        print(f'[ICC_DB] bulk_upsert: {saved}/{len(prospects)} saved')
-        return saved
-    except Exception as e:
-        print(f'[ICC_DB] bulk_upsert fatal error: {e}')
-        return 0
-    finally:
-        conn.close()
+    SQL = """
+        INSERT INTO icc_prospects
+            (id, name, org_type, org_lane, address, city, state,
+             zip, phone, website, source, updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+        ON CONFLICT (id) DO UPDATE SET
+            name=EXCLUDED.name,
+            phone=COALESCE(NULLIF(EXCLUDED.phone,''), icc_prospects.phone),
+            website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website),
+            org_lane=COALESCE(NULLIF(EXCLUDED.org_lane,''), icc_prospects.org_lane),
+            updated_at=NOW()
+    """
+    for i, p in enumerate(prospects):
+        pid  = str(p.get('id') or '').strip()
+        name = str(p.get('name') or '').strip()
+        if not pid or not name:
+            continue
+        conn = get_conn()
+        if not conn:
+            break
+        try:
+            with conn.cursor() as cur:
+                cur.execute(SQL, (
+                    pid, name,
+                    str(p.get('org_type') or 'fqhc'),
+                    str(p.get('org_lane') or 'healthcare'),
+                    str(p.get('address') or ''),
+                    str(p.get('city') or ''),
+                    str(p.get('state') or ''),
+                    str(p.get('zip') or ''),
+                    str(p.get('phone') or ''),
+                    str(p.get('website') or ''),
+                    str(p.get('source') or 'seed'),
+                ))
+            saved += 1
+        except Exception as row_err:
+            if i == 0:
+                print(f'[ICC_DB] First row error ({pid}): {row_err}')
+        finally:
+            conn.close()
+    print(f'[ICC_DB] bulk_upsert: {saved}/{len(prospects)} saved')
+    return saved
 
 
 def save_scan_result(prospect_id: str, website: str, name: str,
