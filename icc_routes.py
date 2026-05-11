@@ -81,6 +81,8 @@ def icc_stats():
         return _unauth()
     from icc_database import get_icc_stats
     stats = get_icc_stats()
+    print(f'[ICC_STATS] Returning: total={stats.get("total",0)} '
+          f'scanned={stats.get("scanned",0)} priority={stats.get("priority",0)}')
     return jsonify(stats)
 
 
