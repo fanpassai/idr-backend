@@ -1000,7 +1000,7 @@ def generate_and_queue_from_prospects(limit=100):
     Only generates for prospects that have been scanned and have a score.
     Skips prospects already in the queue.
     """
-    from icc_database import get_scanned_prospects, get_conn as _icc_conn
+    from icc_database import get_scanned_prospects
     from database import get_conn
 
     # Get scanned prospects with scores
