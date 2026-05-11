@@ -74,8 +74,7 @@ def _harvest_hrsa(state: str, limit: int = 50) -> int:
     Source 1: HRSA Health Center Finder API.
     Returns count added. Never raises — returns 0 on failure.
     """
-    from icc_database import upsert_prospect, log_activity
-    added = 0
+    from icc_database import log_activity
     try:
         urls_to_try = [
             f'https://findahealthcenter.hrsa.gov/api/health-centers?pageNumber=1&pageSize={limit}&sortBy=name&state={state}',
@@ -97,63 +96,72 @@ def _harvest_hrsa(state: str, limit: int = 50) -> int:
             if items:
                 break
 
-        for item in items[:limit]:
-            pid = f"FQHC-{state}-{item.get('id') or item.get('bhcmisnum') or item.get('site_id') or added}"
-            upsert_prospect({
+        prospects = []
+        for i, item in enumerate(items[:limit]):
+            pid = f"FQHC-{state}-{item.get('id') or item.get('bhcmisnum') or item.get('site_id') or i}"
+            prospects.append({
                 'id':       pid,
                 'name':     (item.get('name') or item.get('site_name') or
-                             item.get('health_center_name') or 'Unknown'),
+                             item.get('health_center_name') or f'Health Center {state}-{i}'),
                 'org_type': 'fqhc',
                 'org_lane': 'healthcare',
                 'address':  (item.get('address') or item.get('street_address') or ''),
                 'city':     item.get('city', ''),
                 'state':    item.get('state', state),
-                'zip':      (item.get('zip') or item.get('postal_code') or ''),
+                'zip':      str(item.get('zip') or item.get('postal_code') or ''),
                 'phone':    (item.get('phone') or item.get('telephone') or ''),
                 'website':  (item.get('website') or item.get('web_address') or ''),
                 'source':   'hrsa_api',
             })
-            added += 1
-
+        from icc_database import bulk_upsert_prospects
+        added = bulk_upsert_prospects(prospects)
         if added:
             log_activity('prospect_harvested', f'HRSA API: {added} FQHCs from {state}', added)
+        print(f'[SCOUT] HRSA {state}: {added}/{len(prospects)} FQHCs saved')
     except Exception as e:
         print(f'[SCOUT] HRSA harvest error for {state}: {e}')
     return added
 
 
 def _harvest_cms_nursing_homes(state: str, limit: int = 50) -> int:
-    """Source 2: CMS Care Compare nursing homes."""
-    from icc_database import upsert_prospect, log_activity
-    added = 0
+    """Source 2: CMS Care Compare nursing homes. Uses bulk upsert — one connection."""
+    from icc_database import bulk_upsert_prospects, log_activity
     try:
         url = (f'https://data.cms.gov/provider-data/api/1/datastore/query'
                f'/4pq5-n9py/0?limit={min(limit,200)}&offset=0'
                f'&conditions[0][property]=state&conditions[0][value]={state}')
         data = _fetch_json(url)
         if not data:
+            print(f'[SCOUT] CMS returned no data for {state}')
             return 0
-        for item in (data.get('results') or [])[:limit]:
-            pid = f"NH-{item.get('provnum') or item.get('federal_provider_number', f'{state}-{added}')}"
-            upsert_prospect({
+        items = data.get('results') or []
+        if not items:
+            print(f'[SCOUT] CMS results empty for {state} — keys: {list(data.keys())}')
+            return 0
+        prospects = []
+        for i, item in enumerate(items[:limit]):
+            pid = f"NH-{state}-{item.get('provnum') or item.get('federal_provider_number') or i}"
+            prospects.append({
                 'id':       pid,
-                'name':     (item.get('provname') or item.get('provider_name') or 'Unknown'),
+                'name':     (item.get('provname') or item.get('provider_name') or f'Nursing Home {state}-{i}'),
                 'org_type': 'nh',
                 'org_lane': 'healthcare',
                 'address':  (item.get('address') or item.get('provider_address') or ''),
                 'city':     (item.get('city') or item.get('provider_city') or ''),
                 'state':    item.get('state', state),
-                'zip':      (item.get('zip') or item.get('provider_zip_code') or ''),
+                'zip':      str(item.get('zip') or item.get('provider_zip_code') or ''),
                 'phone':    (item.get('phone') or item.get('provider_phone_number') or ''),
                 'website':  '',
                 'source':   'cms_nh',
             })
-            added += 1
+        added = bulk_upsert_prospects(prospects)
         if added:
             log_activity('prospect_harvested', f'CMS: {added} nursing homes from {state}', added)
+        print(f'[SCOUT] CMS {state}: {added}/{len(prospects)} nursing homes saved')
+        return added
     except Exception as e:
         print(f'[SCOUT] CMS NH harvest error for {state}: {e}')
-    return added
+        return 0
 
 
 def _harvest_data_gov_government(state: str, limit: int = 20) -> int:
@@ -161,8 +169,7 @@ def _harvest_data_gov_government(state: str, limit: int = 20) -> int:
     Source 3: data.gov — city/county government websites.
     Uses the US Government API endpoint for municipal websites.
     """
-    from icc_database import upsert_prospect, log_activity
-    added = 0
+    from icc_database import log_activity
     try:
         # data.gov catalog for government websites
         url = (f'https://catalog.data.gov/api/3/action/package_search'
