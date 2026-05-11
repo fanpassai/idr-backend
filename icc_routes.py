@@ -262,21 +262,41 @@ def icc_trigger_harvest():
 
     try:
         from icc_worker import run_harvest_cycle
+        from icc_database import get_icc_stats
         import threading
-        # Run in background thread so request returns immediately
-        t = threading.Thread(
-            target=run_harvest_cycle,
-            kwargs={'states': states, 'limit_per_state': limit},
-            daemon=True,
-        )
-        t.start()
-        return jsonify({
-            'success': True,
-            'message': f'Harvest started for {len(states)} states — '
-                       f'prospects will appear in database within 60 seconds',
-            'states': states,
-        })
+
+        # Get count before
+        before = get_icc_stats().get('total', 0)
+
+        # Run synchronously for small requests, background for large
+        if len(states) <= 2:
+            # Run inline so we can return real added count
+            run_harvest_cycle(states=states, limit_per_state=limit)
+            after = get_icc_stats().get('total', 0)
+            added = after - before
+            return jsonify({
+                'success': True,
+                'added': added,
+                'message': f'{added} prospects added across {len(states)} states',
+                'states': states,
+                'total_in_db': after,
+            })
+        else:
+            # Run in background for large batches
+            t = threading.Thread(
+                target=run_harvest_cycle,
+                kwargs={'states': states, 'limit_per_state': limit},
+                daemon=True,
+            )
+            t.start()
+            return jsonify({
+                'success': True,
+                'added': 0,
+                'message': f'Harvest running for {len(states)} states — check Radar in 60 seconds',
+                'states': states,
+            })
     except Exception as e:
+        print(f'[HARVEST_ROUTE] Error: {e}')
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
