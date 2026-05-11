@@ -633,23 +633,29 @@ def upsert_prospect(p: dict) -> bool:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO icc_prospects
-                    (id, name, org_type, org_lane, address, city, state,
-                     zip, phone, website, source, updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                    (id, name, org_type, address, city, state,
+                     zip, phone, website, source)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name,
                     phone=COALESCE(NULLIF(EXCLUDED.phone,''), icc_prospects.phone),
-                    website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website),
-                    updated_at=NOW()
+                    website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website)
             """, (
                 str(p.get('id') or ''), str(p.get('name') or ''),
                 str(p.get('org_type') or 'fqhc'),
-                str(p.get('org_lane') or 'healthcare'),
                 str(p.get('address') or ''), str(p.get('city') or ''),
                 str(p.get('state') or ''), str(p.get('zip') or ''),
                 str(p.get('phone') or ''), str(p.get('website') or ''),
                 str(p.get('source') or 'api'),
             ))
+            # Try new columns separately
+            try:
+                cur.execute(
+                    "UPDATE icc_prospects SET org_lane=%s WHERE id=%s",
+                    (str(p.get('org_lane') or 'healthcare'), str(p.get('id') or ''))
+                )
+            except Exception:
+                pass
         return True
     except Exception as e:
         print(f'[ICC_DB] upsert_prospect error: {e}')
@@ -666,17 +672,23 @@ def bulk_upsert_prospects(prospects: list) -> int:
     if not prospects:
         return 0
     saved = 0
-    SQL = """
+    # Core columns only — compatible with both old and new schema
+    SQL_CORE = """
         INSERT INTO icc_prospects
-            (id, name, org_type, org_lane, address, city, state,
-             zip, phone, website, source, updated_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+            (id, name, org_type, address, city, state,
+             zip, phone, website, source)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (id) DO UPDATE SET
             name=EXCLUDED.name,
             phone=COALESCE(NULLIF(EXCLUDED.phone,''), icc_prospects.phone),
-            website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website),
-            org_lane=COALESCE(NULLIF(EXCLUDED.org_lane,''), icc_prospects.org_lane),
-            updated_at=NOW()
+            website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website)
+    """
+    # Extended columns — written separately after core insert succeeds
+    SQL_EXT = """
+        UPDATE icc_prospects SET
+            org_lane=%s,
+            source=%s
+        WHERE id=%s
     """
     for i, p in enumerate(prospects):
         pid  = str(p.get('id') or '').strip()
@@ -688,10 +700,9 @@ def bulk_upsert_prospects(prospects: list) -> int:
             break
         try:
             with conn.cursor() as cur:
-                cur.execute(SQL, (
+                cur.execute(SQL_CORE, (
                     pid, name,
                     str(p.get('org_type') or 'fqhc'),
-                    str(p.get('org_lane') or 'healthcare'),
                     str(p.get('address') or ''),
                     str(p.get('city') or ''),
                     str(p.get('state') or ''),
@@ -700,10 +711,19 @@ def bulk_upsert_prospects(prospects: list) -> int:
                     str(p.get('website') or ''),
                     str(p.get('source') or 'seed'),
                 ))
+                # Try extended columns — fails silently if column doesn't exist yet
+                try:
+                    cur.execute(SQL_EXT, (
+                        str(p.get('org_lane') or 'healthcare'),
+                        str(p.get('source') or 'seed'),
+                        pid,
+                    ))
+                except Exception:
+                    pass
             saved += 1
         except Exception as row_err:
             if i == 0:
-                print(f'[ICC_DB] First row error ({pid}): {row_err}')
+                print(f'[ICC_DB] Row error ({pid}): {row_err}')
         finally:
             conn.close()
     print(f'[ICC_DB] bulk_upsert: {saved}/{len(prospects)} saved')
@@ -739,13 +759,20 @@ def save_scan_result(prospect_id: str, website: str, name: str,
             # Write score
             cur.execute("""
                 UPDATE icc_prospects SET
-                    idr_score=%s, critical_count=%s, total_issues=%s,
+                    idr_score=%s, critical_count=%s,
                     scanned=TRUE, scanned_at=NOW(),
-                    priority=(%s < 60),
-                    maturity_level=%s,
-                    updated_at=NOW()
+                    priority=(%s < 60)
                 WHERE id=%s
-            """, (score, criticals, total_issues, score, maturity, prospect_id))
+            """, (score, criticals, score, prospect_id))
+            # Try new columns separately
+            try:
+                cur.execute("""
+                    UPDATE icc_prospects SET
+                        total_issues=%s, maturity_level=%s
+                    WHERE id=%s
+                """, (total_issues, maturity, prospect_id))
+            except Exception:
+                pass
 
             # Write to scan history
             cur.execute("""
