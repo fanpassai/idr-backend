@@ -750,23 +750,71 @@ def _sendgrid_send(to_email: str, from_email: str, from_name: str,
 # DAILY BRIEFING — 7am EDT. Real data. Specific names. Actionable.
 # =============================================================================
 
+def _sg_send_raw(to_email: str, from_email: str, from_name: str,
+                  subject: str, html: str) -> bool:
+    """
+    Direct SendGrid HTTP call — no library dependency.
+    This is the bulletproof fallback used by the briefing.
+    """
+    if not SENDGRID_KEY:
+        print('[SG_RAW] No API key')
+        return False
+    try:
+        payload = json.dumps({
+            'personalizations': [{'to': [{'email': to_email}]}],
+            'from': {'email': from_email, 'name': from_name},
+            'subject': subject,
+            'content': [{'type': 'text/html', 'value': html}],
+        }).encode()
+        req = urllib.request.Request(
+            'https://api.sendgrid.com/v3/mail/send',
+            data=payload,
+            headers={
+                'Authorization': f'Bearer {SENDGRID_KEY}',
+                'Content-Type': 'application/json',
+            },
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=15, context=_ctx) as r:
+            status = r.status
+        print(f'[SG_RAW] Sent to {to_email} — status {status}')
+        return status in (200, 202)
+    except Exception as e:
+        print(f'[SG_RAW] Error: {e}')
+        return False
+
+
 def send_daily_briefing():
     """
     Sends a real intelligence briefing — pulls from actual DB tables.
     Never generic. Every number is a real count. Every name is a real person.
+    Uses direct HTTP to SendGrid — no library dependency.
     """
     if not SENDGRID_KEY:
         print('[BRIEFING] No SendGrid key — skipping')
         return
 
-    from icc_database import (get_icc_stats, get_scanned_prospects,
-                               get_warm_leads, get_associations,
-                               get_fresh_intelligence, log_activity, BRAND)
+    print('[BRIEFING] Starting...')
 
-    stats  = get_icc_stats()
-    if not stats:
-        print('[BRIEFING] No stats — DB may be empty')
+    try:
+        from icc_database import (get_icc_stats, get_scanned_prospects,
+                                   get_warm_leads, get_associations,
+                                   get_fresh_intelligence, log_activity)
+        BRAND_COLORS = {
+            'navy': '#0B1220', 'gold': '#C8A75A', 'red': '#DC2626',
+            'amber': '#D97706', 'green': '#059669', 'cream': '#F8F6F1',
+        }
+    except Exception as import_err:
+        print(f'[BRIEFING] Import error: {import_err}')
         return
+
+    try:
+        stats = get_icc_stats() or {}
+    except Exception as e:
+        print(f'[BRIEFING] Stats error: {e}')
+        stats = {}
+
+    print(f'[BRIEFING] Stats: {stats}')
 
     scanned    = get_scanned_prospects(limit=100)
     warm_leads = get_warm_leads()
@@ -779,12 +827,12 @@ def send_daily_briefing():
     assoc_warm   = [a for a in assocs if a.get('status') in ('opened', 'replied', 'in_conversation')]
     days_past    = stats.get('days_past_deadline', 0)
 
-    gold   = BRAND['colors']['gold']
-    navy   = BRAND['colors']['deep_navy']
-    red    = BRAND['colors']['red_fail']
-    amber  = BRAND['colors']['amber_warn']
-    green  = BRAND['colors']['green_pass']
-    cream  = BRAND['colors']['cream']
+    gold   = BRAND_COLORS['gold']
+    navy   = BRAND_COLORS['navy']
+    red    = BRAND_COLORS['red']
+    amber  = BRAND_COLORS['amber']
+    green  = BRAND_COLORS['green']
+    cream  = BRAND_COLORS['cream']
 
     def sc(s):
         if s is None: return '#64748B'
@@ -1027,10 +1075,10 @@ Institute of Digital Remediation · Digital Access. Trust. Compliance. · idrshi
 </table>
 </body></html>"""
 
-    ok = _sendgrid_send(
+    ok = _sg_send_raw(
         to_email=BRIEFING_TO,
         from_email='hello@idrshield.com',
-        from_name='ICC — IDR Command Center',
+        from_name='ICC Command Center',
         subject=subject,
         html=html,
     )
