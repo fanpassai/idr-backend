@@ -311,6 +311,25 @@ CREATE TABLE IF NOT EXISTS icc_settings (
 """
 
 
+# Migration statements — safely add new columns to existing tables
+# ALTER TABLE ... ADD COLUMN IF NOT EXISTS is idempotent — safe to run every deploy
+ICC_MIGRATIONS = """
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS org_lane TEXT NOT NULL DEFAULT 'healthcare';
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS maturity_level TEXT DEFAULT 'ABSENT';
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS contact_email TEXT DEFAULT '';
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS total_issues INTEGER DEFAULT 0;
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS outreach_msg TEXT;
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS priority BOOLEAN DEFAULT FALSE;
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS scanned BOOLEAN DEFAULT FALSE;
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ;
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'seed';
+ALTER TABLE icc_prospects ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS idx_icc_prospects_lane ON icc_prospects(org_lane);
+CREATE INDEX IF NOT EXISTS idx_icc_prospects_priority ON icc_prospects(priority);
+CREATE INDEX IF NOT EXISTS idx_icc_prospects_scanned ON icc_prospects(scanned);
+"""
+
+
 def init_icc_db() -> bool:
     conn = get_conn()
     if not conn:
@@ -318,8 +337,17 @@ def init_icc_db() -> bool:
         return False
     try:
         with conn.cursor() as cur:
+            # Create new tables
             cur.execute(ICC_SCHEMA)
-        print('[ICC_DB] Schema v2.0 initialized — all 8 tables ready')
+            # Migrate existing tables — adds missing columns safely
+            for stmt in ICC_MIGRATIONS.strip().split(';'):
+                stmt = stmt.strip()
+                if stmt:
+                    try:
+                        cur.execute(stmt)
+                    except Exception as m_err:
+                        print(f'[ICC_DB] Migration note: {m_err}')
+        print('[ICC_DB] Schema v2.0 initialized + migrations applied')
         _seed_associations()
         return True
     except Exception as e:
@@ -614,13 +642,13 @@ def upsert_prospect(p: dict) -> bool:
                     website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website),
                     updated_at=NOW()
             """, (
-                p['id'], p['name'],
-                p.get('org_type', 'fqhc'),
-                p.get('org_lane', 'healthcare'),
-                p.get('address', ''), p.get('city', ''),
-                p.get('state', ''), p.get('zip', ''),
-                p.get('phone', ''), p.get('website', ''),
-                p.get('source', 'api'),
+                str(p.get('id') or ''), str(p.get('name') or ''),
+                str(p.get('org_type') or 'fqhc'),
+                str(p.get('org_lane') or 'healthcare'),
+                str(p.get('address') or ''), str(p.get('city') or ''),
+                str(p.get('state') or ''), str(p.get('zip') or ''),
+                str(p.get('phone') or ''), str(p.get('website') or ''),
+                str(p.get('source') or 'api'),
             ))
         return True
     except Exception as e:
@@ -631,16 +659,27 @@ def upsert_prospect(p: dict) -> bool:
 
 
 def bulk_upsert_prospects(prospects: list) -> int:
+    """
+    Bulk upsert with explicit commit and per-record error isolation.
+    Uses savepoints so one bad record never kills the batch.
+    """
     if not prospects:
         return 0
     conn = get_conn()
     if not conn:
+        print('[ICC_DB] bulk_upsert: no DB connection')
         return 0
     saved = 0
     try:
         with conn.cursor() as cur:
-            for p in prospects:
+            for i, p in enumerate(prospects):
+                # Skip records with missing required fields
+                pid  = str(p.get('id') or '').strip()
+                name = str(p.get('name') or '').strip()
+                if not pid or not name:
+                    continue
                 try:
+                    cur.execute("SAVEPOINT sp_%d" % i)
                     cur.execute("""
                         INSERT INTO icc_prospects
                             (id, name, org_type, org_lane, address, city, state,
@@ -652,21 +691,29 @@ def bulk_upsert_prospects(prospects: list) -> int:
                             website=COALESCE(NULLIF(EXCLUDED.website,''), icc_prospects.website),
                             updated_at=NOW()
                     """, (
-                        p['id'], p['name'],
-                        p.get('org_type', 'fqhc'),
-                        p.get('org_lane', 'healthcare'),
-                        p.get('address', ''), p.get('city', ''),
-                        p.get('state', ''), p.get('zip', ''),
-                        p.get('phone', ''), p.get('website', ''),
-                        p.get('source', 'seed'),
+                        pid, name,
+                        str(p.get('org_type') or 'fqhc'),
+                        str(p.get('org_lane') or 'healthcare'),
+                        str(p.get('address') or ''),
+                        str(p.get('city') or ''),
+                        str(p.get('state') or ''),
+                        str(p.get('zip') or ''),
+                        str(p.get('phone') or ''),
+                        str(p.get('website') or ''),
+                        str(p.get('source') or 'seed'),
                     ))
+                    cur.execute("RELEASE SAVEPOINT sp_%d" % i)
                     saved += 1
-                except Exception:
-                    pass
+                except Exception as row_err:
+                    print(f'[ICC_DB] Row {i} failed ({pid}): {row_err}')
+                    try:
+                        cur.execute("ROLLBACK TO SAVEPOINT sp_%d" % i)
+                    except Exception:
+                        pass
         print(f'[ICC_DB] bulk_upsert: {saved}/{len(prospects)} saved')
         return saved
     except Exception as e:
-        print(f'[ICC_DB] bulk_upsert error: {e}')
+        print(f'[ICC_DB] bulk_upsert fatal error: {e}')
         return 0
     finally:
         conn.close()
