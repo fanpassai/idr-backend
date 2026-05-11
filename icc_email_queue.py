@@ -996,26 +996,47 @@ def get_queue_stats() -> dict:
 
 def generate_and_queue_from_prospects(limit=100):
     """
-    Pull scanned prospects from DB, generate emails, add to queue.
-    Runs hourly in background.
+    Pull SCANNED prospects from DB, generate emails, add to queue.
+    Only generates for prospects that have been scanned and have a score.
+    Skips prospects already in the queue.
     """
+    from icc_database import get_scanned_prospects, get_conn as _icc_conn
     from database import get_conn
-    from icc_database import get_prospects
-    conn = get_conn()
-    if not conn: return 0
 
-    try:
-        prospects = get_prospects(limit=limit, scanned_only=False)
-    except:
+    # Get scanned prospects with scores
+    prospects = get_scanned_prospects(limit=limit)
+    if not prospects:
+        print('[ICC_QUEUE] No scanned prospects found for email generation')
         return 0
-    finally:
-        conn.close()
+
+    # Get already-queued prospect IDs to avoid duplicates
+    already_queued = set()
+    conn = get_conn()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT prospect_id FROM icc_email_queue
+                    WHERE status = 'pending'
+                """)
+                already_queued = {r[0] for r in cur.fetchall()}
+        except Exception:
+            pass
+        finally:
+            conn.close()
 
     queued = 0
     for p in prospects:
+        pid = p.get('id', '')
+        if pid in already_queued:
+            continue
+        score = p.get('idr_score')
+        if score is None:
+            continue  # Skip unscanned
         email_data = generate_prospect_email(p)
-        if queue_prospect_email(email_data):
-            queued += 1
-    if queued:
-        print(f'[ICC_QUEUE] {queued} prospect emails queued')
+        if email_data and email_data.get('body_text'):
+            if queue_prospect_email(email_data):
+                queued += 1
+
+    print(f'[ICC_QUEUE] Generated {queued} prospect emails from {len(prospects)} scanned')
     return queued
