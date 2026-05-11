@@ -911,52 +911,65 @@ def get_warm_leads() -> list:
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 def get_icc_stats() -> dict:
+    """
+    Bulletproof stats — each query isolated.
+    One failing table never zeros out everything else.
+    """
     conn = get_conn()
     if not conn:
         return {}
+
+    def _q(cur, sql, default=0):
+        try:
+            cur.execute(sql)
+            row = cur.fetchone()
+            return row[0] if row else default
+        except Exception as e:
+            print(f'[ICC_DB] stats query error: {e} | SQL: {sql[:60]}')
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return default
+
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM icc_prospects")
-            total = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_prospects WHERE scanned=TRUE")
-            scanned = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_prospects WHERE priority=TRUE")
-            priority = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_outreach")
-            contacted = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_outreach WHERE status='converted'")
-            converted = cur.fetchone()[0]
-            cur.execute("SELECT COALESCE(SUM(revenue),0) FROM icc_outreach WHERE status='converted'")
-            revenue = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_outreach WHERE status IN ('replied','interested','opened','clicked')")
-            warm = cur.fetchone()[0]
-            cur.execute("""
-                SELECT event_type, detail, created_at FROM icc_activity
-                ORDER BY created_at DESC LIMIT 20
-            """)
-            activity = [
-                {'type': r[0], 'detail': r[1],
-                 'time': r[2].strftime('%H:%M') if r[2] else ''}
-                for r in cur.fetchall()
-            ]
-            cur.execute("SELECT COUNT(*) FROM icc_associations WHERE status != 'not_contacted'")
-            assoc_contacted = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_associations WHERE status = 'not_contacted'")
-            assoc_not_contacted = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_prospects WHERE org_lane='government'")
-            gov_total = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM icc_content WHERE status='draft'")
-            content_pending = cur.fetchone()[0]
+            total    = _q(cur, "SELECT COUNT(*) FROM icc_prospects")
+            scanned  = _q(cur, "SELECT COUNT(*) FROM icc_prospects WHERE scanned=TRUE")
+            priority = _q(cur, "SELECT COUNT(*) FROM icc_prospects WHERE priority=TRUE")
+            contacted= _q(cur, "SELECT COUNT(*) FROM icc_outreach")
+            converted= _q(cur, "SELECT COUNT(*) FROM icc_outreach WHERE status='converted'")
+            revenue  = _q(cur, "SELECT COALESCE(SUM(revenue),0) FROM icc_outreach WHERE status='converted'")
+            warm     = _q(cur, "SELECT COUNT(*) FROM icc_outreach WHERE status IN ('replied','interested','opened','clicked')")
+            gov_total= _q(cur, "SELECT COUNT(*) FROM icc_prospects WHERE org_lane='government'")
+
+            # Optional tables — may not exist yet on first deploy
+            content_pending = _q(cur, "SELECT COUNT(*) FROM icc_content WHERE status='draft'")
+            assoc_contacted = _q(cur, "SELECT COUNT(*) FROM icc_associations WHERE status != 'not_contacted'")
+            assoc_not_contacted = _q(cur, "SELECT COUNT(*) FROM icc_associations WHERE status = 'not_contacted'")
+
+            # Activity feed
+            activity = []
+            try:
+                cur.execute("""
+                    SELECT event_type, detail, created_at FROM icc_activity
+                    ORDER BY created_at DESC LIMIT 20
+                """)
+                activity = [
+                    {'type': r[0], 'detail': r[1],
+                     'time': r[2].strftime('%H:%M') if r[2] else ''}
+                    for r in cur.fetchall()
+                ]
+            except Exception as e:
+                print(f'[ICC_DB] activity query error: {e}')
 
         from datetime import date as _date
-        _today = _date.today()
-        _dl = _date(2026, 5, 11)
-        days_past = (_today - _dl).days
+        days_past = max(0, (_date.today() - _date(2026, 5, 11)).days)
 
-        return {
+        result = {
             'total': total, 'scanned': scanned, 'priority': priority,
             'contacted': contacted, 'converted': converted,
-            'revenue': revenue, 'warm': warm,
+            'revenue': int(revenue or 0), 'warm': warm,
             'days_past_deadline': days_past,
             'activity': activity,
             'assoc_contacted': assoc_contacted,
@@ -964,8 +977,11 @@ def get_icc_stats() -> dict:
             'gov_total': gov_total,
             'content_pending': content_pending,
         }
+        print(f'[ICC_DB] Stats: total={total} scanned={scanned} priority={priority}')
+        return result
+
     except Exception as e:
-        print(f'[ICC_DB] stats error: {e}')
+        print(f'[ICC_DB] stats fatal error: {e}')
         return {}
     finally:
         conn.close()
