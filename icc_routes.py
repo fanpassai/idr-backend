@@ -870,6 +870,51 @@ def icc_playbook():
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
+
+
+@icc_bp.route('/api/stats/breakdown', methods=['GET'])
+@cross_origin()
+def icc_stats_breakdown():
+    """
+    Shows exactly what's in the DB by org type and state.
+    Proof that Scout Agent harvests are landing in the database.
+    """
+    if not _auth(request):
+        return _unauth()
+    from database import get_conn
+    conn = get_conn()
+    if not conn:
+        return jsonify({'breakdown': []})
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    org_type,
+                    org_lane,
+                    state,
+                    COUNT(*) as count,
+                    COUNT(*) FILTER (WHERE scanned=TRUE) as scanned,
+                    COUNT(*) FILTER (WHERE priority=TRUE) as priority
+                FROM icc_prospects
+                GROUP BY org_type, org_lane, state
+                ORDER BY count DESC
+                LIMIT 100
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            # Total summary
+            cur.execute("SELECT COUNT(*), org_type FROM icc_prospects GROUP BY org_type ORDER BY COUNT(*) DESC")
+            by_type = [{'type': r[1], 'count': r[0]} for r in cur.fetchall()]
+        return jsonify({
+            'breakdown': rows,
+            'by_type': by_type,
+            'message': 'Real counts from icc_prospects table'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'breakdown': []})
+    finally:
+        conn.close()
+
 @icc_bp.route('/health', methods=['GET'])
 def icc_health():
     return jsonify({
