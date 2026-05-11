@@ -713,12 +713,12 @@ def icc_send_briefing_now():
         return _unauth()
     try:
         from icc_worker import send_daily_briefing
-        import threading
-        t = threading.Thread(target=send_daily_briefing, daemon=True)
-        t.start()
+        # Run inline so errors surface immediately — not silently swallowed
+        send_daily_briefing()
         return jsonify({'success': True,
-                        'message': 'Briefing sending to idrshieldhq@gmail.com'})
+                        'message': 'Briefing sent to idrshieldhq@gmail.com'})
     except Exception as e:
+        print(f'[BRIEFING_ROUTE] Error: {e}')
         return jsonify({'success': False, 'error': str(e)})
 
 
